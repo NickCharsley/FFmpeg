@@ -11,23 +11,30 @@ FFmpeg::Stream - An audio or video stream from a (multi)media file.
 
 =head1 DESCRIPTION
 
-Objects of this class are not intended to be
-instantiated directly by the end user.  Access
-L<FFmpeg::Stream|FFmpeg::Stream> objects using methods in
+FFmpeg::Stream objects are not instantiated.  Rather, objects are
+instantiated from FFmpeg::Stream's subclasses
+L<FFmpeg::Stream::Video|FFmpeg::Stream::Video> for video streams,
+L<FFmpeg::Stream::Audio|FFmpeg::Stream::Audio> for audio streams, and
+L<FFmpeg::Stream::Data|FFmpeg::Stream::Data> for streams containing
+neither audio nor video data.  Streams identified in the file whose
+content type cannot be determined are represented by
+L<FFmpeg::Stream::Unknown|FFmpeg::Stream::Unknown> objects.
+
+Access L<FFmpeg::Stream|FFmpeg::Stream> objects using methods in
 L<FFmpeg::StreamGroup|FFmpeg::StreamGroup>.  See
 L<FFmpeg::StreamGroup> for more information.
 
-This class represents a media stream in a multimedia
-file.  B<FFmpeg-Perl> represents multimedia file
-information in a L<FFmpeg::StreamGroup|FFmpeg::StreamGroup> object, which is
-a composite of L<FFmpeg::Stream|FFmpeg::Stream> objects.
+This class has attributes applicable to any stream type in a
+multimedia stream, or stream group.  B<FFmpeg-Perl> represents multimedia
+stream group information in a L<FFmpeg::StreamGroup|FFmpeg::StreamGroup>
+object, which is a composite of L<FFmpeg::Stream|FFmpeg::Stream>
+objects.
 
-L<FFmpeg::Stream|FFmpeg::Stream> objects don't do much.  They just keep
-track of the media stream's ID within the multimedia
-file, and hold an instance to a L<FFmpeg::Codec|FFmpeg::Codec> object
-if the codec of the stream was deducible.  See
-L<FFmpeg::Codec> for more information about how
-codecs are represented.
+L<FFmpeg::Stream|FFmpeg::Stream> objects don't do much.  They just
+keep track of the media stream's ID within the multimedia stream group, and
+hold an instance to a L<FFmpeg::Codec|FFmpeg::Codec> object if the
+codec of the stream was deducible.  See L<FFmpeg::Codec> for more
+information about how codecs are represented.
 
 =head1 FEEDBACK
 
@@ -139,47 +146,73 @@ sub init {
   my($self,%arg) = @_;
 
   foreach my $arg (keys %arg){
-    $self->$arg($arg{$arg}) if $self->can($arg);
+    $self->{$arg} = $arg{$arg};
   }
 
   return 1;
 }
 
-=head2 fourcc()
+=head2 bit_rate()
 
 =over
 
 =item Usage
 
- $obj->fourcc();        #get existing value
-
- $obj->fourcc($newval); #set new value
+ $obj->bit_rate();        #get existing value
 
 =item Function
 
-stores the fourcc (four character code) of the stream's codec
+average bit rate of stream, in bits/second.
 
 =item Returns
 
-value of fourcc (a scalar)
+value of bit_rate (a scalar)
 
 =item Arguments
 
-=over
+none, read-only
 
-=item (optional) on set, a scalar
+=item Notes
 
-=back
+There are sticky issues here, please refer to
+L<FFmpeg::StreamGroup/bit_rate()> for details.
 
 =back
 
 =cut
 
-sub fourcc {
+sub bit_rate {
   my $self = shift;
+  return $self->{'bit_rate'};
+}
 
-  return $self->{'fourcc'} = shift if defined(@_);
-  return $self->{'fourcc'};
+=head2 bit_rate_tolerance()
+
+=over
+
+=item Usage
+
+ $obj->bit_rate_tolerance();        #get existing value
+
+=item Function
+
+variance, essentially, of L</bit_rate()|bit_rate()>.
+
+=item Returns
+
+value of bit_rate_tolerance (a scalar)
+
+=item Arguments
+
+none, read-only
+
+=back
+
+=cut
+
+sub bit_rate_tolerance {
+  my $self = shift;
+  return $self->{'bit_rate_tolerance'};
 }
 
 =head2 codec()
@@ -189,7 +222,6 @@ sub fourcc {
 =item Usage
 
  $obj->codec();        #get existing FFmpeg::Codec
-
  $obj->codec($newval); #set new FFmpeg::Codec
 
 =item Function
@@ -201,11 +233,7 @@ an object of class L<FFmpeg::Codec|FFmpeg::Codec>
 
 =item Arguments
 
-=over
-
-=item (optional) on set, an object of class L<FFmpeg::Codec|FFmpeg::Codec>
-
-=back
+(optional) on set, an object of class L<FFmpeg::Codec|FFmpeg::Codec>
 
 =back
 
@@ -245,11 +273,7 @@ value of codec_tag (a scalar)
 
 =item Arguments
 
-=over
-
-=item (optional) on set, a scalar
-
-=back
+none, read-only
 
 =back
 
@@ -257,27 +281,27 @@ value of codec_tag (a scalar)
 
 sub codec_tag {
   my $self = shift;
-
-  return $self->{'codec_tag'} = shift if defined(@_);
   return $self->{'codec_tag'};
 }
 
-=head2 is_audio()
+
+=head2 duration()
 
 =over
 
 =item Usage
 
-$obj->is_audio(); #get existing value
+  $obj->duration(); #get existing value
 
 =item Function
 
-is the codec of this stream an audio codec?
+duration of stream in microseconds.  a stream may not have the
+same duration as its L<FFmpeg::StreamGroup|FFmpeg::StreamGroup>
+container.
 
 =item Returns
 
-a boolean, derived from the associated L<FFmpeg::Codec|FFmpeg::Codec>,
-see L</codec()>.
+value of duration (a scalar) FIXME should be Time::Piece
 
 =item Arguments
 
@@ -287,28 +311,27 @@ none, read-only
 
 =cut
 
-sub is_audio {
+sub duration {
   my $self = shift;
-  return undef unless $self->codec;
-  return $self->codec->is_audio;
+
+  return $self->{'duration'};
 }
 
-=head2 is_video()
+=head2 fourcc()
 
 =over
 
 =item Usage
 
-$obj->is_video(); #get existing value
+ $obj->fourcc();        #get existing value
 
 =item Function
 
-is the codec of this stream a video codec?
+stores the fourcc (four character code) of the stream's codec
 
 =item Returns
 
-a boolean, derived from the associated L<FFmpeg::Codec|FFmpeg::Codec>,
-see L</codec()>.
+value of fourcc (a scalar)
 
 =item Arguments
 
@@ -318,11 +341,41 @@ none, read-only
 
 =cut
 
-sub is_video {
+sub fourcc {
   my $self = shift;
-  return undef unless $self->codec;
-  return $self->codec->is_video;
+  return $self->{'fourcc'};
 }
 
+=head2 start_time()
+
+=over
+
+=item Usage
+
+  $obj->start_time(); #get existing value
+
+=item Function
+
+start time of stream in seconds.  a stream may not begin
+at the same time as its L<FFmpeg::StreamGroup|FFmpeg::StreamGroup>
+container.
+
+=item Returns
+
+value of start_time (a scalar) #FIXME Time::Piece
+
+=item Arguments
+
+none, read-only
+
+=back
+
+=cut
+
+sub start_time {
+  my $self = shift;
+
+  return $self->{'start_time'};
+}
 
 1;

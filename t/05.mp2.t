@@ -12,8 +12,8 @@ ok($sg->isa('FFmpeg::StreamGroup')            , 'object correct type');
 ok($sg->duration->isa('Time::Piece')          , 'object correct type');
 is($sg->duration->hms, '00:00:18'             , 'streamgroup duration correct');
 is(scalar($sg->streams), 1                    , 'stream count correct');
-is(scalar(grep {$_->is_video} $sg->streams), 0, 'video stream count correct');
-is(scalar(grep {$_->is_audio} $sg->streams), 1, 'audio stream count correct');
+is(scalar(grep {$_->isa('FFmpeg::Stream::Video')} $sg->streams), 0, 'video stream count correct');
+is(scalar(grep {$_->isa('FFmpeg::Stream::Audio')} $sg->streams), 1, 'audio stream count correct');
 
 ok($sg->has_audio                             , 'audio detected ok');
 ok(!$sg->has_video                            , 'video detected ok');

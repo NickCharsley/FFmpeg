@@ -33,15 +33,16 @@ is($file_formats[6]->can_write, 1,               'asf_stream format writable');
 is($file_formats[6]->description, 'asf format',  'asf_stream description');
 is($file_formats[6]->mime_type, 'video/x-ms-asf','asf_format mime');
 
-is($file_formats[12]->name, 'dv1394',                'dv1394 format available');
-is($file_formats[12]->can_read,  1,                  'dv1394 format readable');
-is($file_formats[12]->can_write, 0,                  'dv1394 format notwritable');
-is($file_formats[12]->description, 'dv1394 A/V grab','dv1394 description');
-is($file_formats[12]->mime_type, '',                 'dv1394 mime');
+is($file_formats[12]->name, 'dv',                    'dv format available');
+is($file_formats[12]->can_read,  1,                  'dv format readable');
+is($file_formats[12]->can_write, 1,                  'dv format writable');
+is($file_formats[12]->description, 'DV video format','dv description');
+is($file_formats[12]->mime_type, undef,              'dv mime');
 
 is_deeply($ff->file_format('ac3'),        $file_formats[3], 'file_format retrieval successful');
 is_deeply($ff->file_format('asf_stream'), $file_formats[6], 'file_format retrieval successful');
-is_deeply($ff->file_format('dv1394'),     $file_formats[12],'file_format retrieval successful');
+
+is_deeply($ff->file_format('dv'),     $file_formats[12],'file_format retrieval successful');
 
 #
 # test image formats
@@ -82,20 +83,20 @@ is($codecs[0]->can_read,  1,        '4xm codec readable');
 is($codecs[0]->can_write, 0,        '4xm codec not writable');
 is($codecs[0]->is_video, 1,         '4xm codec is video');
 is($codecs[0]->is_audio, 0,         '4xm codec is not audio');
-is($codecs[0]->id, 44,              '4xm codec id');
+is($codecs[0]->id, 45,              '4xm codec id');
 
 is($codecs[2]->name, 'ac3',         'ac3 codec available');
 is($codecs[2]->can_read,  0,        'ac3 codec not readable');
 is($codecs[2]->can_write, 1,        'ac3 codec writable');
 is($codecs[2]->is_video, 0,         'ac3 codec is not video');
-is($codecs[2]->id, 10,              'ac3 codec id');
+is($codecs[2]->id, 11,              'ac3 codec id');
 
 is($codecs[14]->name, 'asv1',       'asv1 codec available');
 is($codecs[14]->can_read,  1,       'asv1 codec readable');
 is($codecs[14]->can_write, 1,       'asv1 codec writable');
 is($codecs[14]->is_video, 1,        'asv1 codec is video');
 is($codecs[14]->is_audio, 0,        'asv1 codec is not audio');
-is($codecs[14]->id, 41,             'asv1 codec id');
+is($codecs[14]->id, 42,             'asv1 codec id');
 
 is_deeply($ff->codec('4xm'),  $codecs[0], 'codec retrieval successful');
 is_deeply($ff->codec('ac3'),  $codecs[2], 'codec retrieval successful');

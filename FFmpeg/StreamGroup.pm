@@ -68,6 +68,10 @@ use strict;
 use Data::Dumper;
 use File::Copy;
 use File::Temp qw(tempfile tempdir);
+
+use IO::String;
+use Image::Magick::Iterator;
+
 use base qw();
 our $VERSION = '0.01';
 
@@ -550,7 +554,7 @@ sub has_audio() {
 
   if(!defined($self->{'has_audio'})){
     foreach my $stream ( $self->streams ){
-      $self->{'has_audio'}++ and last if $stream->is_audio;
+      $self->{'has_audio'}++ and last if $stream->isa('FFmpeg::Stream::Audio');
     }
   }
 
@@ -587,7 +591,7 @@ sub has_video() {
 
   if(!defined($self->{'has_video'})){
     foreach my $stream ( $self->streams ){
-      $self->{'has_video'}++ and last if $stream->is_video;
+      $self->{'has_video'}++ and last if $stream->isa('FFmpeg::Stream::Video');
     }
   }
 
@@ -809,21 +813,26 @@ the format requested
 
 =over
 
+=item frame_rate (optional)
+
+affect how many frames/second are captured.  for instance, a
+value of 0.016 will result in one roughly frame per minute.  FIXME, this
+argument should really be a Time::HiRes object.
+
 =item frame_size (optional)
 
 dimensions for image as a width x height string (eg "320x240").
 defaults to streamgroup's native frame size
-
-=item image_format (optional)
-
-a L<FFmpeg::ImageFormat|FFmpeg::ImageFormat> object for the output format to be used.
-defaults to PPM format
 
 =item output_file (optional)
 
 path to filename where captured frame willbe written.  defaults
 to an anonymous tempfile created using L<File::Temp|File::Temp> that is
 deleted upon program termination
+
+=item recording_time (optional, B<IMPORTANT>)
+
+A Time::Piece object which determines how many seconds will be recorded.
 
 =item start_time (optional)
 
@@ -838,15 +847,29 @@ offset at which to capture the frame. defaults to 00:00:00
 
 sub capture_frame {
   my ($self,%arg) = @_;
+  $arg{recording_time} = '00:00:00.001';
+
+  my $iterator = $self->capture_frames(%arg);
+  #warn $iterator;
+  my $next = $iterator->next();
+  #warn $next;
+  return $next;
+}
+
+sub capture_frames {
+  my ($self,%arg) = @_;
 
   #
   #setup parameters for frame capture
   #
   #warn $self->url;
   $self->_ffmpeg->_set_input_file($self->url);
-  $self->_ffmpeg->_set_recording_time('00:00:00.001');
 
-  $self->_ffmpeg->_set_format('image');
+  if($arg{frame_rate}){
+    $self->_ffmpeg->_set_frame_rate($arg{frame_rate});
+  }
+
+  $self->_ffmpeg->_set_format('imagepipe');
 
   my($fh, $fn);
   if(!defined($arg{output_file})){
@@ -873,34 +896,86 @@ sub capture_frame {
     $self->_ffmpeg->_set_start_time('00:00:00');
   }
 
-  if(defined($arg{image_format}) and $arg{image_format}->isa('FFmpeg::ImageFormat')){
-    my $f = $arg{image_format};
+  if(defined($arg{recording_time})){
+    my $t = $arg{recording_time};
 
-    $self->_ffmpeg->_set_image_format($f->name);
-#    $self->_ffmpeg->_set_format($f->name);
+    if(!ref($t)){
+      $self->_ffmpeg->_set_recording_time($arg{recording_time}); #FIXME
+    } else {
+
+      $self->_ffmpeg->_set_recording_time(
+                                          sprintf(
+                                                  "%02d:%02d:%02d",
+                                                  $t->hour,
+                                                  $t->min,
+                                                  $t->sec
+                                                 )
+                                         );
+    }
   } else {
-    $self->_ffmpeg->_set_image_format('ppm');
-#    $self->_ffmpeg->_set_format('ppm');
+    #FIXME add warning, this is a full transcode
   }
 
-  $self->_ffmpeg->_set_output_file("$fn.%d");
+  $self->_ffmpeg->_set_image_format('ppm');
 
+  $self->_ffmpeg->_set_output_file($fn);
+
+  $self->_ffmpeg->toggle_stderr(1); #intercept STDERR writes from ffmpeg-c
   $self->_ffmpeg->_run_ffmpeg();
+  $self->_ffmpeg->toggle_stderr(0); #reenable STDERR
 
-  move("$fn.1",$fn);
   open($fh,$fn) or die "couldn't open '$fn': $!";
 
-#  my $im = Image::Magick->new;
-#  $im->Read(file => $fh);
-
-#  printf("\n\nimage (%dx%d) written to: %s\n\n", $im->Get('width'), $im->Get('height'), $fn);
-
-#  $im->Equalize();
-#  $im->Write(filename=>'foo.bar.jpg');
+  my $iter = Image::Magick::Iterator->new();
+  $iter->format('PPM');
+  $iter->handle($fh);
 
   $self->_ffmpeg->_cleanup();
 
-  return $fh;
+  return $iter;
+
+  #return $fh; #FIXME, return an Image::Magick object
 }
+
+############################################################
+
+=head2 capture_frames()
+
+=over
+
+=item Usage
+
+  $obj->capture_frames();
+
+=item Function
+
+
+=item Returns
+
+
+=item Arguments
+
+None
+
+=back
+
+=cut
+
+# sub capture_frames {
+#   my ($self,%arg) = @_;
+
+#   my($fh, $fn) = tempfile(UNLINK => 0);
+
+#   $self->_ffmpeg->_set_input_file($self->url);
+#   $self->_ffmpeg->_set_recording_time('00:00:10'); #FIXME
+#   $self->_ffmpeg->_set_start_time('00:00:00');     #FIXME
+#   $self->_ffmpeg->_set_frame_rate(1);              #FIXME
+#   $self->_ffmpeg->_set_format('imagepipe');        #FIXME
+#   $self->_ffmpeg->_set_image_format('ppm');        #FIXME
+#   $self->_ffmpeg->_set_output_file($fn);
+# warn $fn;
+#   $self->_ffmpeg->_run_ffmpeg();
+#   $self->_ffmpeg->_cleanup();
+# }
 
 1;

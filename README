@@ -27,7 +27,7 @@ is specified in ld.so.conf.  Be sure to run "ldconfig" *twice* after
 editing ld.so.conf.
 
 FFmpeg is under active development.  This library was developed and 
-tested on the FFmpeg CVS HEAD tag as of Mon Apr 26 01:18:46 PDT 2004.
+tested on the FFmpeg CVS HEAD tag as of Thu Sep 30 01:19:14 PDT 2004.
 FFmpeg was configured and installed using the options:
 
 configure \
@@ -43,23 +43,17 @@ enabled.  If you experience problems with FFmpeg-perl or FFmpeg-C, try
 recompiling without the shared library support to see if regression
 tests pass.
 
-My build corresponds roughly to FFmpeg version 0.4.8.  A tarball made
-from a CVS snapshot on this date is available from:
-
-http://www.wooly.org/~allenday/images/tar/ffmpeg-0.4.8-040426cvshead.tar.gz
-
-although I recommend you use the latest in FFmpeg's CVS.
-
 INSTALLATION
 
 To install this module type the following:
 
-   perl Makefile.PL FFMPEG_ROOT=/path/to/ffmpeg/source
+   # set $FFMPEG_ROOT environmental variable to /path/to/ffmpeg/source
+   perl Makefile.PL
    make
    make test
 
-It is critical to pass the FFMPEG_ROOT argument to Makefile.PL, so that
-The Perl/C interface code is able to correctly bind to ffmpeg functions.
+It is critical that $FFMPEG_ROOT be set so that The Perl/C interface code
+is able to correctly bind to ffmpeg functions.
 
 Then as a user with install privileges:
 
@@ -69,8 +63,10 @@ DEPENDENCIES
 
 This module requires these other modules and libraries:
 
-   Inline::C,     tested with version 0.44
-   Time::Piece,   tested with version 1.08
+   Image::Magick           ?.??
+   Image::Magick::Iterator 0.01
+   Image::PBMlib           1.05
+   Time::Piece,            1.08
 
 COPYRIGHT AND LICENCE
 

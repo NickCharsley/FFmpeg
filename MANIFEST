@@ -10,15 +10,21 @@ eg/t2.asf
 eg/t2.avi
 eg/t2.mov
 eg/t3.asf
-empty.c
+FFmpeg.pm
 FFmpeg.PMS
+FFmpeg.xs
 FFmpeg/Codec.pm
 FFmpeg/FileFormat.pm
 FFmpeg/ImageFormat.pm
 FFmpeg/Stream.pm
+FFmpeg/Stream/Audio.pm
+FFmpeg/Stream/Data.pm
+FFmpeg/Stream/Unknown.pm
+FFmpeg/Stream/Video.pm
 FFmpeg/StreamGroup.pm
 Makefile.PL
 MANIFEST
+META.yml			Module meta-data (added by MakeMaker)
 README
 t/01.FFmpeg.t
 t/02.asf.t
@@ -27,5 +33,4 @@ t/04.mov.t
 t/05.mp2.t
 t/06.mp3.t
 t/07.m2v.t
-TODO
-META.yml                                 Module meta-data (added by MakeMaker)
+t/08.capture.t
