@@ -1,0 +1,79 @@
+FFmpeg version 0.01
+====================
+FFmpeg (in this module, referred to here as FFmpeg-Perl) is a Perl
+interface to the base project FFmpeg (referred to here as FFmpeg-C).
+From the FFmpeg-C homepage:
+
+FFmpeg-C is a complete solution to record, convert and stream audio and
+video. It includes libavcodec, the leading audio/video codec library.
+FFmpeg-C is developed under Linux, but it can compiled under most OSes,
+including Windows.
+
+FFmpeg-Perl currently only supports the functionality of the ffmpeg and
+libavformat components  of the FFmpeg-C suite.  That is, functions
+exist for extracting metadata from media streams and transforming one
+media stream format to another, but no effort is (yet) made to port
+HTTP broadcasting or playback functionality (provided by the ffserver
+and ffplay components, respectively).
+
+PREREQUISITES
+
+Download and install the CVS version of FFmpeg.  The installation must
+be configured with shared library support so libavformat and libavcodec
+can be dynamically linked.  Make sure the install path of the shared
+libraries is in the dynamic link path.  In Linux, this means locating
+the libavformat.so and libavcodec.so files, and making sure their path
+is specified in ld.so.conf.  Be sure to run "ldconfig" *twice* after
+editing ld.so.conf.
+
+FFmpeg is under active development.  This library was developed and 
+tested on the FFmpeg CVS HEAD tag as of Mon Apr 26 01:18:46 PDT 2004.
+FFmpeg was configured and installed using the options:
+
+configure \
+  --enable-pthreads \
+  --enable-mp3lame \
+  --enable-shared \
+  --enable-vorbis
+
+Note that this requires libmp3lame, libvorbis, and libpthreads to be
+installed.  FFmpeg's "make test" failed for me with this configuration
+because the regression test suite doesn't like having shared libraries
+enabled.  If you experience problems with FFmpeg-perl or FFmpeg-C, try
+recompiling without the shared library support to see if regression
+tests pass.
+
+My build corresponds roughly to FFmpeg version 0.4.8.  A tarball made
+from a CVS snapshot on this date is available from:
+
+http://www.wooly.org/~allenday/images/tar/ffmpeg-0.4.8-040426cvshead.tar.gz
+
+although I recommend you use the latest in FFmpeg's CVS.
+
+INSTALLATION
+
+To install this module type the following:
+
+   perl Makefile.PL FFMPEG_ROOT=/path/to/ffmpeg/source
+   make
+   make test
+
+It is critical to pass the FFMPEG_ROOT argument to Makefile.PL, so that
+The Perl/C interface code is able to correctly bind to ffmpeg functions.
+
+Then as a user with install privileges:
+
+   make install
+
+DEPENDENCIES
+
+This module requires these other modules and libraries:
+
+   Inline::C,     tested with version 0.44
+   Time::Piece,   tested with version 1.08
+
+COPYRIGHT AND LICENCE
+
+Copyright (c) 2003-2004 by Allen Day
+
+This library is released under GPL, the Gnu Public License

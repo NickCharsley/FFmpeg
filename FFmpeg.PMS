@@ -1,0 +1,1240 @@
+#!perl -w
+my $FFMPEG_ROOT = pop @ARGV;
+
+use Config;
+use File::Basename qw(&basename &dirname);
+use Cwd;
+
+$origdir = cwd;
+chdir dirname($0);
+$file = basename($0, '.PM','.PMS');
+$file = "$file.pm";
+
+open OUT,">$file" or die "Can't create $file: $!";
+print OUT <<'!NO!SUBS!';
+=head1 NAME
+
+FFmpeg - Perl interface to FFmpeg, a video converter
+written in C
+
+=head1 SYNOPSIS
+
+  use FFmpeg;
+
+  my @media = qw(my.mpg my.avi my.mov my.mp2 my.mp3);
+
+  #instantiate a new FFmpeg object.
+  my $ff = FFmpeg->new();
+
+  foreach my $media (@media){
+    #load each media file
+    $ff->input_file($media);
+
+    #and create the stream info, accessible in a
+    #FFmpeg::StreamGroup object.
+    my $sg = $ff->create_streamgroup();
+
+    #we're only interested in StreamGroups with
+    #a visual component
+    next unless $sg->has_video;
+
+    #capture a frame at offset 30s into the video
+    #stream in jpeg format, and get a filehandle on
+    #the jpeg data stream.
+    my $fh = $sg->capture_frame(
+               image_format => $ff->image_format('jpeg'),
+               start_time => '00:00:30'
+             );
+
+    #write the jpeg to a file.
+    open(JPEG, ">$media.jpg");
+    print JPEG $_ while <$fh>;
+    close(JPEG);
+  }
+
+=head1 DESCRIPTION
+
+FFmpeg (in this module, referred to here as B<FFmpeg-Perl>) is a
+Perl interface to the base project FFmpeg (referred to here as
+B<FFmpeg-C>).  From the B<FFmpeg-C> homepage:
+
+B<FFmpeg-C> is a complete solution to record, convert and stream
+audio and video. It includes libavcodec, the leading
+audio/video codec library. B<FFmpeg-C> is developed under Linux,
+but it can compiled under most OSes, including Windows.
+
+The project is made of several components:
+
+=over 4
+
+=item I<ffmpeg>
+
+a command line tool to convert one video file format to another.
+It also supports grabbing and encoding in real time from a TV
+card.
+
+
+=item I<ffserver>
+
+an HTTP (RTSP is being developped) multimedia
+streaming server for live broadcasts. Time shifting of
+live broadcast is also supported.
+
+=item I<ffplay>
+
+a simple media player based on SDL and on the ffmpeg libraries.
+
+=item I<libavcodec>
+
+a library containing all the ffmpeg audio/video encoders and
+decoders. Most codecs were developed from scratch to ensure
+best performances and high code reusability.
+
+=item I<libavformat>
+
+a library containing parsers and generators for all common
+audio/video formats.
+
+=back
+
+B<FFmpeg-Perl> currently only supports the functionality of the
+I<ffmpeg> and I<libavformat> components  of the B<FFmpeg-C>
+suite.  That is, functions exist for extracting metadata from
+media streams and transforming one media stream format to
+another, but no effort is (yet) made to port HTTP
+broadcasting or playback functionality (provided by the
+I<ffserver> and I<ffplay> components, respectively).
+
+
+=head1 FEEDBACK
+
+=head2 Mailing Lists
+
+Questions, feedback, and bug reports related to the B<FFmpeg-Perl>
+interface to B<FFmpeg-C> should be sent to the Perl Video mailing
+list.  Subscribe here:
+
+L<http://sumo.genetics.ucla.edu/mailman/listinfo/perl-video/>
+
+Questions, feedback, and bug reports related to the underlying
+B<FFmpeg-C> code should be sent to the general ffmpeg user and
+developer.  More information is available here:
+
+L<http://ffmpeg.sourceforge.net/>
+
+=head2 Reporting Bugs
+
+See "Mailing Lists" above.
+
+=head2 Patches
+
+I'm very open to bug reports in the form of patches, as well as
+patches that extend or add to the functionality of the library.
+Please send a diff using "diff -up", along with a summary of the
+purpose of the patch to the Perl Video mailing list (address
+above, see "Mailing Lists").
+
+=head1 AUTHOR
+
+Allen Day E<lt>allenday@ucla.eduE<gt>
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright (c) 2003-2004 Allen Day
+
+This library is released under GPL, the Gnu Public License
+
+=head1 APPENDIX
+
+The rest of the documentation details each of the object methods.
+Internal methods are usually preceded with a '_'.  Methods are
+in alphabetical order for the most part.
+
+=cut
+
+
+# Let the code begin...
+
+
+package FFmpeg;
+use strict;
+use base qw( DynaLoader);
+our $VERSION = '0.01';
+
+use Data::Dumper;
+use DynaLoader;
+#use Image::Magick;
+use Time::Piece;
+
+use FFmpeg::Codec;
+use FFmpeg::Stream;
+use FFmpeg::FileFormat;
+use FFmpeg::ImageFormat;
+use FFmpeg::StreamGroup;
+
+#BEGIN {
+{
+  local $/;
+  no warnings 'io'; #stops "readline() on unopened filehandle DATA" errors
+
+  use Inline ( C => 'DATA',
+!NO!SUBS!
+print OUT <<"!GROK!THIS!";
+               AUTO_INCLUDE => ['#include "$FFMPEG_ROOT/ffmpeg.c"'],
+               INC  => '-I/usr/local/include/ffmpeg -I$FFMPEG_ROOT/libavcodec -I$FFMPEG_ROOT/libavformat',
+               LIBS => '-L/usr/local/lib -lavcodec -lavformat -lm -lz -ldl -lmp3lame -logg -lvorbis -lvorbisenc',
+!GROK!THIS!
+print OUT <<'!NO!SUBS!';
+               NAME => 'FFmpeg',
+               VERSION => '0.01',
+             );
+  Inline->init();
+  bootstrap FFmpeg 0.01;
+}
+
+=head2 new()
+
+=over
+
+=item Usage
+
+my $obj = new FFmpeg();
+
+=item Function
+
+Builds a new FFmpeg object
+
+=item Returns
+
+an instance of FFmpeg
+
+=item Arguments
+
+=over
+
+=item All optional.
+
+all get/set methods can have their value initialized by new() if
+new is called as:
+
+  my $ff = FFmpeg->new(input_file => 'my.file', verbose => 10);
+
+with as many/few get/set fields as you like.
+
+=back
+
+=back
+
+=cut
+
+sub new {
+  my($class,%arg) = @_;
+
+  my $self = bless {}, $class;
+  $self->init(%arg);
+
+  return $self;
+}
+
+=head2 init()
+
+=over
+
+=item Usage
+
+$obj->init(%arg);
+
+=item Function
+
+Internal method to initialize a new FFmpeg object
+
+=item Returns
+
+true on success
+
+=item Arguments
+
+=over
+
+=item Arguments passed to L</new()>
+
+=back
+
+=back
+
+=cut
+
+sub init {
+  my($self,%arg) = @_;
+
+  #this does some FFmpeg-internal setup.
+  #loading codecs, etc.
+  $self->_init_ffmpeg();
+
+  #turn off verbosity
+  $self->verbose(-1);
+
+  #turn off overwrite prompting
+  $self->_set_overwrite(1);
+
+  foreach my $arg (keys %arg){
+    $self->$arg($arg{$arg}) if $self->can($arg);
+  }
+
+  #initialize fileformat and imageformat objects
+  $self->file_formats();
+  $self->image_formats();
+
+  return 1;
+}
+
+=head2 create_streamgroup()
+
+=over
+
+=item Usage
+
+$sg = $obj->create_streamgroup();
+
+=item Function
+
+This factory method creates and returns a new
+L<FFmpeg::StreamGroup|FFmpeg::StreamGroup> object for the file set by
+a call to L</input_file()>.
+
+=item Returns
+
+A L<FFmpeg::StreamGroup|FFmpeg::StreamGroup> object, or undef on failure
+
+=item Arguments
+
+=over
+
+=item None
+
+=back
+
+=back
+
+=cut
+
+sub create_streamgroup {
+  my ($self) = @_;
+
+  if(!$self->input_file){
+    warn "no valid input_file, refusing to construct an FFmpeg::StreamGroup";
+    return undef;
+  }
+
+  my $avfc = $self->_init_AVFormatContext;
+
+  my %init = %{ $self->_init_streamgroup($avfc,$self->input_file) };
+  return undef if $init{'error'};
+  #die $init{'error'} if $init{'error'};
+
+  my($width,$height);
+  if(ref($init{stream}) eq 'HASH'){ #has streams
+    foreach my $stream (keys %{ $init{stream} }){
+      next unless ref($init{stream}{$stream}) eq 'HASH';
+
+      $height ||= $init{stream}{$stream}{height};
+      $width  ||= $init{stream}{$stream}{width};
+      last if defined($width) and defined($height);
+    }
+  }
+
+  my $nullsite = index($init{format},chr(0));
+  if($nullsite != -1){
+    warn "HACK WTF IS GOING ON HERE?";
+    warn index($init{format},chr(0));
+    warn $init{format};
+    $init{format} = substr($init{format}, 0, $nullsite);
+    warn $init{format};
+  }
+
+  my $group = FFmpeg::StreamGroup->new(
+                                       file_size   => $init{file_size},
+                                       data_offset => $init{data_offset},
+                                       bit_rate    => $init{bit_rate},
+                                       track       => $init{track},
+                                       copyright   => $init{copyright},
+                                       author      => $init{author},
+                                       duration    => Time::Piece->strptime($init{duration} || '00:00:00',"%T"),
+                                       genre       => $init{genre},
+                                       album       => $init{album},
+                                       comment     => $init{comment},
+                                       format      => $self->file_format($init{format}),
+                                       url         => $init{url},
+                                       year        => $init{year},
+                                       width       => $width,
+                                       height      => $height,
+                                       _ffmpeg     => $self,
+                                      );
+
+  foreach my $s (sort keys %{ $init{stream} }){
+
+    # audio codecs are difficult to determine sometimes, see
+    # libavcodec/dvdata.h, libavcodec/mpegaudiodectab.h, and
+    # libavcodec/wmadata.h
+    #
+    # the best method i can see to handle this right now,
+    # short of doing a lookup in these matrices (that i don't
+    # understand anyway) is to leave the codec as undef.
+    #
+    # not the ideal solution :( FIXME
+
+    my $stream = FFmpeg::Stream->new(
+                                     fourcc => join('',map {chr($_)} (unpack('c*',pack('I',$init{stream}{$s}{codec_tag})))),
+                                     codec_tag => $init{stream}{$s}{codec_tag},
+                                     codec => $self->codec($init{stream}{$s}{codec_id}),
+                                    );
+    $group->_add_stream($stream);
+  }
+
+  #FIXME do we still need these?
+  $self->_free_AVFormatContext($avfc);
+
+  return $group;
+}
+
+
+=head2 codec()
+
+=over
+
+=item Usage
+
+$obj->codec($codec_name);
+
+=item Function
+
+returns a codec by name or id.
+
+=item Returns
+
+A L<FFmpeg::Codec|FFmpeg::Codec> object, or undef if the codec specified could
+not be found.
+
+=item Arguments
+
+=over
+
+=item name (or id) of codec to retrieve
+
+=back
+
+=back
+
+=cut
+
+sub codec {
+  my $self = shift;
+  my $codec_name = shift;
+
+  if($codec_name =~ /^\d+$/){
+    #TODO: flip name/id hash keying if this is called more often
+    foreach my $codec ($self->codecs){
+      return $codec if $codec->id == $codec_name;
+    }
+
+    return undef;
+  }
+
+  return $self->{'_codecs'}{$codec_name};
+}
+
+=head2 codecs()
+
+=over
+
+=item Usage
+
+@codecs = $obj->codecs();
+
+=item Function
+
+returns a list of all codecs B<FFmpeg-C> supports.
+
+=item Returns
+
+A list of L<FFmpeg::Codec|FFmpeg::Codec> objects
+
+=item Arguments
+
+=over
+
+=item none, read-only
+
+=back
+
+=back
+
+=cut
+
+sub codecs {
+  my ($self) = @_;
+
+  if(! $self->{'_codecs'}){
+    my %codecs = %{ $self->_codecs() };
+
+    foreach my $cname (keys %codecs){
+      my($id) = $codecs{$cname} =~ /^\[(.+)\]/;
+      my $c = FFmpeg::Codec->new(
+                                        id => hex($id),
+                                        name => $cname,
+                                        can_read  => ($codecs{$cname} =~ /D/ ? 1 : 0),
+                                        can_write => ($codecs{$cname} =~ /E/ ? 1 : 0),
+                                        is_audio  => ($codecs{$cname} =~ /A/ ? 1 : 0),
+                                        is_video  => ($codecs{$cname} =~ /V/ ? 1 : 0),
+                                       );
+
+      $self->{'_codecs'}{$cname} = $c;
+    }
+  }
+
+
+  return values %{ $self->{'_codecs'} };
+}
+
+=head2 create_timepiece()
+
+=over
+
+=item Usage
+
+$tp = $obj->create_timepiece("00:30:00"); #create a L<Time::Piece|Time::Piece> at 30 minutes.
+
+=item Function
+
+Factory method that creates a L<Time::Piece|Time::Piece> object from a string.  See
+L<Time::Piece/strptime()> or details on the string format expected.  The
+resolution on this object is unfortunately 1 second.  I am still looking for
+a module to manipulate time in sub-second units as easily as L<Time::Piece|Time::Piece>.
+
+=item Returns
+
+A L<Time::Piece|Time::Piece> object on success.
+
+=item Arguments
+
+=over
+
+=item time string
+
+a string (see Usage) in HH:MM:SS format representing the time offset
+of interest
+
+=back
+
+=back
+
+=cut
+
+sub create_timepiece {
+  my ($self,$time) = @_;
+
+  if(ref($time) and $time->isa('Time::Piece')){
+    return $time;
+  } else {
+    return Time::Piece->strptime($time, "%T");
+  }
+}
+
+=head2 file_format()
+
+=over
+
+=item Usage
+
+$obj->file_format($file_format_name);
+
+=item Function
+
+returns a file format by name.
+
+=item Returns
+
+A L<FFmpeg::FileFormat|FFmpeg::FileFormat> object, or undef if the file format specified could
+not be found.
+
+=item Arguments
+
+=over
+
+=item name of file format to retrieve
+
+=back
+
+=back
+
+=cut
+
+sub file_format {
+  my $self = shift;
+  my $file_formatname = shift;
+
+  return $self->{'_file_formats'}{$file_formatname};
+}
+
+=head2 file_formats()
+
+=over
+
+=item Usage
+
+@formats = $obj->file_formats();
+
+=item Function
+
+returns a list of all file formats B<FFmpeg-C> supports.
+
+=item Returns
+
+A list of L<FFmpeg::FileFormat|FFmpeg::FileFormat> objects
+
+=item Arguments
+
+=over
+
+=item none, read-only
+
+=back
+
+=back
+
+=cut
+
+sub file_formats {
+  my ($self) = @_;
+
+  if(! $self->{'_file_formats'}){
+    my %formats = %{ $self->_file_formats() };
+
+    foreach my $fname (keys %formats){
+      my $f = FFmpeg::FileFormat->new(
+                                             name => $formats{$fname}{name},
+                                             description => $formats{$fname}{description},
+                                             mime_type => $formats{$fname}{mime_type},
+                                             can_read  => ($formats{$fname}{capabilities} =~ /D/ ? 1 : 0),
+                                             can_write => ($formats{$fname}{capabilities} =~ /E/ ? 1 : 0),
+                                            );
+
+      $self->{'_file_formats'}{$fname} = $f;
+    }
+  }
+
+  return values %{ $self->{'_file_formats'} };
+}
+
+=head2 image_format()
+
+=over
+
+=item Usage
+
+$obj->image_format($image_format_name);
+
+=item Function
+
+returns an image format by name.
+
+=item Returns
+
+A L<FFmpeg::ImageFormat|FFmpeg::ImageFormat> object, or undef if the image format specified could
+not be found.
+
+=item Arguments
+
+=over
+
+=item name of image format to retrieve
+
+=back
+
+=back
+
+=cut
+
+sub image_format {
+  my $self = shift;
+  my $image_format_name = shift;
+
+  return $self->{'_image_formats'}{$image_format_name};
+}
+
+
+=head2 image_formats()
+
+=over
+
+=item Usage
+
+@formats = $obj->image_formats();
+
+=item Function
+
+returns a list of all image formats B<FFmpeg-C> supports.
+
+=item Returns
+
+A list of L<FFmpeg::ImageFormat|FFmpeg::ImageFormat> objects
+
+=item Arguments
+
+=over
+
+=item none, read-only
+
+=back
+
+=back
+
+=cut
+
+sub image_formats {
+  my ($self) = @_;
+
+  if(! $self->{'_image_formats'}){
+    my %formats = %{ $self->_image_formats() };
+
+    foreach my $fname (keys %formats){
+      my $f = FFmpeg::ImageFormat->new(
+                                              name => $fname,
+                                              can_read  => ($formats{$fname} =~ /D/ ? 1 : 0),
+                                              can_write => ($formats{$fname} =~ /E/ ? 1 : 0),
+                                             );
+
+      $self->{'_image_formats'}{$fname} = $f;
+    }
+  }
+
+  return values %{ $self->{'_image_formats'} };
+}
+
+=head2 input_file()
+
+=over
+
+=item Usage
+
+ $obj->input_file();        #get existing value
+
+ $obj->input_file($newval); #set new value
+
+=item Function
+
+Holds path to file for input and processing.  This get/setter
+additionally validates the existance of the file on set and
+throws an exception if the file does not exist.
+
+=item Returns
+
+value of input_file (a scalar)
+
+=item Arguments
+
+=over
+
+=item (optional) on set, a scalar
+
+=back
+
+=back
+
+=cut
+
+sub input_file {
+  my $self = shift;
+  my $file = shift;
+
+  if(defined($file) and ! -f $file){
+    warn qq(couldn't use file "$file": $!);
+    return undef;
+  }
+
+  return $self->{'input_file'} = $file if defined($file);
+  return $self->{'input_file'};
+}
+
+=head2 verbose()
+
+=over
+
+=item Usage
+
+ $obj->verbose();        #get existing value
+
+ $obj->verbose($newval); #set new value
+
+=item Function
+
+adjust the reporting of B<FFmpeg-C> to STDERR.  this is initialized
+to -1, or near-silent, the lowest level of verbosity possible in
+B<FFmpeg-C>.
+
+=item Returns
+
+value of verbose (a scalar)
+
+=item Arguments
+
+=over
+
+=item (optional) on set, a scalar
+
+=back
+
+=back
+
+=cut
+
+sub verbose {
+  my $self = shift;
+  my $val  = shift;
+
+  $self->{'verbose'} = $val if defined($val);
+  $self->_set_verbose(int($self->{'verbose'}));
+  return $self->{'verbose'};
+}
+
+=head2 _AVFormatContext()
+
+=over
+
+=item Usage
+
+ $obj->_AVFormatContext();        #get existing value
+
+ $obj->_AVFormatContext($newval); #set new value
+
+=item Function
+
+internal method, don't mess with this unless you know what
+you're doing, and/or want to risk coredumping and/or crashing
+your machine.  this holds an int-cast pointer to a B<FFmpeg-C>
+AVFormatContext struct.  it is needed to manipulate the media
+streams.
+
+=item Returns
+
+value of _AVFormatContext (a scalar)
+
+=item Arguments
+
+=over
+
+=item (optional) on set, a scalar
+
+=back
+
+=back
+
+=cut
+
+sub _AVFormatContext {
+  my $self = shift;
+
+  return $self->{'_AVFormatContext'} = shift if @_;
+  return $self->{'_AVFormatContext'};
+}
+
+1;
+
+__DATA__
+__C__
+
+int foo(SV *self){
+  return 1234;
+}
+
+// these are from cmdutils.h, declared here so we don't need to link cmdutils.o
+void show_help_options(const OptionDef *options, const char *msg, int mask, int value){}
+void print_error(const char *filename, int err){}
+void parse_options(int argc, char **argv, const OptionDef *options){}
+
+// todo, make av_log() store the error log in a perl-accessible SV*
+void av_log(void *avcl, int level, const char *fmt, ...){}
+
+
+/* ********************************************************************** *
+ *
+ * to be documented
+ *
+ * ********************************************************************** */
+
+void _init_ffmpeg(SV *self){
+  av_register_all();
+}
+
+void _run_ffmpeg(SV *self){
+  av_encode(output_files, nb_output_files, input_files, nb_input_files, stream_maps, nb_stream_maps);
+}
+
+/* ********************************************************************** *
+ *
+ * setter functions to affect ffmpeg.c behavior.  these serve the same
+ * purpose as ffmpeg's commandline options.
+ *
+ * ********************************************************************** */
+
+void _cleanup(SV *self){
+  nb_input_files  = 0;
+  nb_output_files = 0;
+  nb_stream_maps  = 0;
+}
+
+void _set_format(SV *self, char *arg){
+  opt_format(arg);
+}
+
+void _set_frame_size(SV *self, char *arg){
+  opt_frame_size(arg);
+}
+
+void _set_image_format(SV *self, char *arg){
+  opt_image_format(arg);
+}
+
+void _set_input_file(SV *self, char *arg){
+  opt_input_file(arg);
+}
+
+void _set_output_file(SV *self, char *arg){
+  opt_output_file(arg);
+}
+
+void _set_overwrite(SV *self, int o){
+  file_overwrite = o;
+}
+
+void _set_recording_time(SV *self, char *arg){
+  opt_recording_time(arg);
+}
+
+void _set_start_time(SV *self, char *arg){
+  opt_start_time(arg);
+}
+
+void _set_verbose(SV *self, int v){
+  verbose = v;
+}
+
+/* ********************************************************************** *
+ *
+ * custom functions to access libavcodec/libavformat file/stream metadata
+ * from perl.
+ *
+ * ********************************************************************** */
+
+HV* _image_formats(SV *self){
+  HV *hash = newHV();
+
+  AVInputFormat *ifmt;
+  AVOutputFormat *ofmt;
+  AVImageFormat *image_fmt;
+  URLProtocol *up;
+  AVCodec *p, *p2;
+  const char **pp, *last_name;
+
+  last_name = "000";
+  for(image_fmt = first_image_format; image_fmt != NULL; 
+      image_fmt = image_fmt->next) {
+    hv_store(hash,
+             image_fmt->name,
+             strlen(image_fmt->name),
+             newSVpvf("%s%s",
+                      image_fmt->img_read ? "D":" ",
+                      image_fmt->img_write ? "E":" "
+                     ),
+             0
+            );
+  }
+
+  return hash;
+}
+
+HV* _file_formats(SV *self){
+  HV *hash = newHV();
+
+  AVInputFormat *ifmt;
+  AVOutputFormat *ofmt;
+  AVImageFormat *image_fmt;
+  URLProtocol *up;
+  AVCodec *p, *p2;
+  const char **pp, *last_name;
+
+  // hv_store(hash, "callalert", strlen("callalert"), newSVpv("jkl;",0), 0);
+
+  last_name = "000";
+  for(;;){
+    int decode = 0;
+    int encode = 0;
+    const char *name=NULL;
+    const char *longname=NULL;
+    const char *mimetype=NULL;
+
+    for(ofmt = first_oformat; ofmt != NULL; ofmt = ofmt->next) {
+      if((name == NULL || strcmp(ofmt->name, name)<0) &&
+         strcmp(ofmt->name, last_name)>0){
+        name= ofmt->name;
+        longname= ofmt->long_name;
+        mimetype= ofmt->mime_type;
+        encode=1;
+      }
+    }
+    for(ifmt = first_iformat; ifmt != NULL; ifmt = ifmt->next) {
+      if((name == NULL || strcmp(ifmt->name, name)<0) &&
+         strcmp(ifmt->name, last_name)>0){
+        name= ifmt->name;
+        longname= ifmt->long_name;
+        encode=0;
+      }
+      if(name && strcmp(ifmt->name, name)==0)
+        decode=1;
+    }
+    if(name==NULL)
+      break;
+    last_name= name;
+    HV *codec = newHV();
+
+    hv_store(hash,
+             name,
+             strlen(name),
+             newRV_noinc((SV *) codec),
+             0
+            );
+
+    hv_store(codec,"capabilities",strlen("capabilities"),
+             newSVpvf("%s%s",
+                      decode ? "D":" ",
+                      encode ? "E":" "
+                     ),0);
+
+    hv_store(codec,"name",strlen("name"),
+             newSVpvf("%s",name),0);
+
+    hv_store(codec,"description",strlen("description"),
+             newSVpvf("%s",longname),0);
+
+    if(mimetype){
+      hv_store(codec,"mime_type",strlen("mime_type"),
+               newSVpvf("%s",mimetype),0);
+    }
+
+  }
+
+  return hash;
+}
+
+int _init_AVFormatContext(SV *self){
+  int *ic = av_malloc(sizeof(AVFormatContext));
+  return (int) ic;
+}
+
+void _free_AVFormatContext(SV *self, int ic_addr){
+  AVFormatContext *ic = (AVFormatContext *) ic_addr;
+  av_free(ic);
+}
+
+HV* _init_streamgroup(SV *self, int ic_addr, char *filename){
+  HV *hash = newHV();
+  HV *stream = newHV();
+
+  hv_store(hash,"stream",strlen("stream"),
+           newRV_noinc((SV *) stream),0);
+
+  AVFormatContext *ic = (AVFormatContext *) ic_addr;
+  AVFormatParameters params, *ap = &params;
+  int err, i, flags;
+  char buf[256];
+
+  ap->image_format = image_format;
+
+  err = av_open_input_file(&ic, filename, file_iformat, 0, ap);
+  if (err < 0) {
+    hv_store(hash,"error",strlen("error"),newSVpvf("av_open_input_file returned: %d", err),0);
+    return hash;
+  }
+
+  err = av_find_stream_info(ic);
+  if (err < 0) {
+    hv_store(hash,"error",strlen("error"),
+             newSVpvf("av_find_stream_info could not find codec parameters; returned: %d", err),0);
+    return hash;
+  }
+
+  hv_store(hash,"format",strlen("format"),
+           newSVpvf("%s", ic->iformat->name,PL_na), 0);
+
+  hv_store(hash,"url",   strlen("url"),
+           newSVpvf("%s",filename),0);
+  hv_store(hash,"title",strlen("title"),
+           newSVpvf("%s",ic->title),0);
+  hv_store(hash,"author",strlen("author"),
+           newSVpvf("%s",ic->author),0);
+  hv_store(hash,"copyright",strlen("copyright"),
+           newSVpvf("%s",ic->copyright),0);
+  hv_store(hash,"comment",strlen("comment"),
+           newSVpvf("%s",ic->comment),0);
+  hv_store(hash,"album",strlen("album"),
+           newSVpvf("%s",ic->album),0);
+  hv_store(hash,"genre",strlen("genre"),
+           newSVpvf("%s",ic->genre),0);
+
+  hv_store(hash,"year",strlen("year"),
+           newSViv(ic->year),0);
+  hv_store(hash,"track",strlen("track"),
+           newSViv(ic->track),0);
+  hv_store(hash,"file_size",strlen("file_size"),
+           newSViv(ic->file_size),0);
+  hv_store(hash,"data_offset",strlen("data_offset"),
+           newSViv(ic->data_offset),0);
+
+  if(ic->duration != AV_NOPTS_VALUE){
+    int hours, mins, secs, dsecs;
+    secs  = ic->duration / AV_TIME_BASE;
+    dsecs = ic->duration % AV_TIME_BASE;
+    mins  = secs / 60;
+    secs %= 60;
+    hours = mins / 60;
+    mins %= 60;
+
+    //Time::Piece doesn't like usecs.
+    //hv_store(hash,"duration",strlen("duration"),
+    //         newSVpvf("%02d:%02d:%02d.%01d", hours, mins, secs, (10 * dsecs) / AV_TIME_BASE),0);
+    hv_store(hash,"duration",strlen("duration"),
+             newSVpvf("%02d:%02d:%02d", hours, mins, secs), 0);
+  }
+
+  hv_store(hash,"bit_rate",strlen("bit_rate"),
+           newSViv(ic->bit_rate),0);
+
+  for(i=0;i<ic->nb_streams;i++){
+    AVStream *st = ic->streams[i];
+
+    HV *tstream = newHV();
+
+    char stream_name[9];
+    sprintf(stream_name, "stream%02d", i);
+
+    hv_store(stream,stream_name,strlen(stream_name),
+             newRV_noinc((SV *) tstream),0);
+
+    AVCodecContext *codec = &st->codec;
+
+    // AVFormatContext values
+    hv_store(tstream,"index",strlen("index"),
+             newSViv(st->index),0);
+    hv_store(tstream,"id",strlen("id"),
+             newSViv(st->id),0);
+    hv_store(tstream,"real_frame_rate",strlen("real_frame_rate"),
+             newSViv(st->r_frame_rate),0);
+    hv_store(tstream,"real_frame_rate_base",strlen("real_frame_rate_base"),
+             newSViv(st->r_frame_rate_base),0);
+    hv_store(tstream,"start_time",strlen("start_time"),
+             newSViv(st->start_time),0);
+    hv_store(tstream,"duration",strlen("duration"),
+             newSViv(st->duration),0);
+
+    hv_store(tstream,"quality",strlen("quality"),
+             newSVnv(st->quality),0);
+
+    // AVCodecContext values
+    hv_store(tstream,"bit_rate",strlen("bit_rate"),
+             newSViv(codec->bit_rate),0);
+    hv_store(tstream,"bit_rate_tolerance",strlen("bit_rate_tolerance"),
+             newSViv(codec->bit_rate_tolerance),0);
+    hv_store(tstream,"frame_rate",strlen("frame_rate"),
+             newSViv(codec->frame_rate),0);
+    hv_store(tstream,"width",strlen("width"),
+             newSViv(codec->width),0);
+    hv_store(tstream,"height",strlen("height"),
+             newSViv(codec->height),0);
+    hv_store(tstream,"sample_rate",strlen("sample_rate"),
+             newSViv(codec->sample_rate),0);
+    hv_store(tstream,"channels",strlen("channels"),
+             newSViv(codec->channels),0);
+    hv_store(tstream,"sample_format",strlen("sample_format"),
+             newSViv(codec->sample_fmt),0);
+
+    // do we want to initalize these???
+    // hv_store(tstream,"frame_size",strlen("frame_size"),
+    //          newSViv(codec->frame_size),0);
+    // hv_store(tstream,"frame_number",strlen("frame_number"),
+    //          newSViv(codec->frame_number),0);
+    // hv_store(tstream,"real_pict_number",strlen("real_pict_number"),
+    //          newSViv(codec->real_pict_num),0);
+
+    // hv_store(tstream,"codec_name",strlen("codec_name"),
+    //          newSVpvf("%s",codec->codec_name),0);
+
+    hv_store(tstream,"codec_id",strlen("codec_id"),
+             newSViv(codec->codec_id),0);
+    hv_store(tstream,"codec_tag",strlen("codec_tag"),
+             newSVuv(codec->codec_tag),0);
+
+    // PixelFormat - initialize?
+
+    // hv_store(tstream,"color_table_id",strlen("color_table_id"),
+    //          newSViv(codec->color_table_id),0);
+
+  }
+
+  return hash;
+}
+
+HV* _codecs(SV *self){
+  HV *hash = newHV();
+
+  AVInputFormat *ifmt;
+  AVOutputFormat *ofmt;
+  AVImageFormat *image_fmt;
+  URLProtocol *up;
+  AVCodec *p, *p2;
+  const char **pp, *last_name;
+
+  last_name = "000";
+  for(;;){
+    int decode=0;
+    int encode=0;
+    int cap=0;
+
+    p2=NULL;
+    for(p = first_avcodec; p != NULL; p = p->next) {
+      if((p2==NULL || strcmp(p->name, p2->name)<0) &&
+         strcmp(p->name, last_name)>0){
+        p2= p;
+        decode= encode= cap=0;
+      }
+      if(p2 && strcmp(p->name, p2->name)==0){
+        if(p->decode) decode=1;
+        if(p->encode) encode=1;
+        cap |= p->capabilities;
+      }
+    }
+    if(p2==NULL)
+      break;
+    last_name= p2->name;
+
+    hv_store(hash,
+             p2->name,
+             strlen(p2->name),
+             newSVpvf("[%x]%s%s%s",
+                      p2->id,
+                      decode ? "D" : " ",
+                      encode ? "E" : " ",
+                      p2->type == CODEC_TYPE_AUDIO ? "A" : "V"
+                     ),
+             0
+            );
+  }
+
+  return hash;
+}
+
+
+!NO!SUBS!
+close OUT or die "Can't close $file: $!";
+chmod 0644, $file or die "Can't reset permissions for $file: $!\n";
+chdir $origdir;
+
