@@ -1,7 +1,5 @@
 use ExtUtils::MakeMaker;
 use Config;
-use File::Spec;
-use File::Copy;
 
 $FFMPEG_ROOT = $ENV{FFMPEG_ROOT};
 if(!defined($FFMPEG_ROOT)){
@@ -31,9 +29,13 @@ WriteMakefile(
       'LDDLFLAGS'     => "$Config{'lddlflags'} $LDDLFLAGS",
 
       'PREREQ_PM'     => {
-              Time::Piece   => 1.08,
+              Devel::Leak => 0,
+              File::Temp => 0,
+              HTTP::Request => 0,
               Image::Magick::Iterator   => 0.01,
               Image::PBMlib => 1.05, #1.06?
+              LWP::UserAgent => 0,
+              Time::Piece   => 1.08,
       },
 
       ($] >= 5.005 ?    ## Add these new keywords supported since 5.005

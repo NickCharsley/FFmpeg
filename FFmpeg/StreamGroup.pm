@@ -792,7 +792,7 @@ sub _ffmpeg {
 C<
 $obj->capture_frame(
                     image_format => $ffmpeg_format,
-                    start_time   => $time_piece,
+                    offset       => $time_piece,
                     frame_size   => "320x240",
                     output_file  => "/path/to/file.ppm",
 );
@@ -834,7 +834,7 @@ deleted upon program termination
 
 A Time::Piece object which determines how many seconds will be recorded.
 
-=item start_time (optional)
+=item offset (optional)
 
 a L<Time::Piece|Time::Piece> object or string in HH:MM:SS format specifying
 offset at which to capture the frame. defaults to 00:00:00
@@ -847,7 +847,7 @@ offset at which to capture the frame. defaults to 00:00:00
 
 sub capture_frame {
   my ($self,%arg) = @_;
-  $arg{recording_time} = '00:00:00.001';
+  $arg{duration} = '00:00:00.001';
 
   my $iterator = $self->capture_frames(%arg);
   #warn $iterator;
@@ -882,8 +882,9 @@ sub capture_frames {
     $self->_ffmpeg->_set_frame_size($arg{frame_size});
   }
 
-  if(defined($arg{start_time}) and $arg{start_time}->isa('Time::Piece')){
-    my $t = $self->_ffmpeg->create_timepiece($arg{start_time});
+  if(defined($arg{offset})){
+    my $t = $self->_ffmpeg->create_timepiece($arg{offset});
+
     $self->_ffmpeg->_set_start_time(
                                     sprintf(
                                             "%02d:%02d:%02d",
@@ -896,11 +897,11 @@ sub capture_frames {
     $self->_ffmpeg->_set_start_time('00:00:00');
   }
 
-  if(defined($arg{recording_time})){
-    my $t = $arg{recording_time};
+  if(defined($arg{duration})){
+    my $t = $arg{duration};
 
     if(!ref($t)){
-      $self->_ffmpeg->_set_recording_time($arg{recording_time}); #FIXME
+      $self->_ffmpeg->_set_recording_time($arg{duration}); #FIXME
     } else {
 
       $self->_ffmpeg->_set_recording_time(
@@ -936,46 +937,5 @@ sub capture_frames {
 
   #return $fh; #FIXME, return an Image::Magick object
 }
-
-############################################################
-
-=head2 capture_frames()
-
-=over
-
-=item Usage
-
-  $obj->capture_frames();
-
-=item Function
-
-
-=item Returns
-
-
-=item Arguments
-
-None
-
-=back
-
-=cut
-
-# sub capture_frames {
-#   my ($self,%arg) = @_;
-
-#   my($fh, $fn) = tempfile(UNLINK => 0);
-
-#   $self->_ffmpeg->_set_input_file($self->url);
-#   $self->_ffmpeg->_set_recording_time('00:00:10'); #FIXME
-#   $self->_ffmpeg->_set_start_time('00:00:00');     #FIXME
-#   $self->_ffmpeg->_set_frame_rate(1);              #FIXME
-#   $self->_ffmpeg->_set_format('imagepipe');        #FIXME
-#   $self->_ffmpeg->_set_image_format('ppm');        #FIXME
-#   $self->_ffmpeg->_set_output_file($fn);
-# warn $fn;
-#   $self->_ffmpeg->_run_ffmpeg();
-#   $self->_ffmpeg->_cleanup();
-# }
 
 1;

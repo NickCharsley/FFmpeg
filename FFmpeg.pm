@@ -16,6 +16,12 @@ written in C
     #load each media file
     $ff->input_file($media);
 
+    #or from a URL.  note that input_url
+    #enables use of other input_url_* args
+    $ff->input_url('http://wherever.org/whatever.mpg');
+    $ff->input_url_referrer('http://somewhere.org/overtherainbow');
+    $ff->input_url_max_size('5000'); #in bytes
+
     #and create the stream info, accessible in a
     #FFmpeg::StreamGroup object.
     my $sg = $ff->create_streamgroup();
@@ -146,8 +152,12 @@ package FFmpeg;
 use strict;
 use vars qw($VERSION);
 
-$VERSION = '0.02';
+$VERSION = '0.03';
 
+use Data::Dumper;
+use File::Temp qw(tempfile);
+use HTTP::Request;
+use LWP::UserAgent;
 use Time::Piece;
 
 use FFmpeg::Codec;
@@ -258,6 +268,38 @@ sub init {
     $self->$arg($arg{$arg}) if $self->can($arg);
   }
 
+  if($self->input_url && $self->input_file){
+    warn "input_url and input_file both defined, using input_file"
+  } elsif($self->input_url){
+    my($fh,$file) = tempfile(CLEANUP=>1);
+    my $ua1 = LWP::UserAgent->new();
+    $ua1->max_size($self->input_url_max_size);
+    my $req = HTTP::Request->new('GET',$self->input_url);
+    $req->header('Referer' => $self->input_url_referrer()) if $self->input_url_referrer();
+    my $res = $ua1->request($req);
+    if($res->is_success){
+      print $fh $res->content();
+      close($fh);
+      $self->input_file($file);
+
+      #now HEAD for true file size
+      if($self->input_url_max_size){
+        my $ua2 = LWP::UserAgent->new();
+        my $req = HTTP::Request->new('HEAD',$self->input_url);
+        $req->header('Referer' => $self->input_url_referrer()) if $self->input_url_referrer();
+        my $res = $ua2->request($req);
+        if($res->is_success){
+          $self->{'input_url_head_size'} = $res->header('Content-Length');
+        } else {
+          warn "problem HEADing ".$self->input_url.', got error: '.$res->status_line;
+        }
+      }
+    } else {
+      warn "problem downloading ".$self->input_url.', got error: '.$res->status_line;
+      $self->input_file('/dev/null');
+    }
+  }
+
   #initialize fileformat and imageformat objects
   $self->file_formats();
   $self->image_formats();
@@ -299,13 +341,21 @@ sub create_streamgroup {
   my ($self) = @_;
 
   if(!$self->input_file){
-    warn "no valid input_file, refusing to construct an FFmpeg::StreamGroup";
+#    warn "no valid input_file, refusing to construct an FFmpeg::StreamGroup";
     return undef;
   }
 
   my $avfc = $self->_init_AVFormatContext;
 
-  my %init = %{ $self->_init_streamgroup($avfc,$self->input_file) };
+  my $i = $self->_init_streamgroup($avfc,$self->input_file);
+  my %init = ();
+  if($i){
+    %init = %{ $i }
+  } else {
+#    warn "failed to initialize file ". $self->input_url || $self->input_file;
+    return undef;
+  }
+
   return undef if $init{'error'};
   #die $init{'error'} if $init{'error'};
 
@@ -346,6 +396,20 @@ sub create_streamgroup {
     warn $init{format};
   }
 
+  #time parsing is borked on max_size requests for some reason
+  my $duration;
+  if($self->{input_url_head_size}){
+    $duration = Time::Piece->strptime('00:00:00','%T');
+  } else {
+    $init{duration} ||= '00:00:00';
+    $duration = Time::Piece->strptime($init{duration},'%T');
+  }
+
+  #this special case uses the Content-Length header to set size.
+  $init{file_size} = $self->{input_url_head_size} if $self->{input_url_head_size};
+
+  #warn "\n".Data::Dumper::Dumper(\%init)."\n";
+
   my $group = FFmpeg::StreamGroup->new(
                                        file_size   => $init{file_size},
                                        data_offset => $init{data_offset},
@@ -353,7 +417,7 @@ sub create_streamgroup {
                                        track       => $init{track},
                                        copyright   => $init{copyright},
                                        author      => $init{author},
-                                       duration    => Time::Piece->strptime($init{duration} || '00:00:00',"%T"),
+                                       duration    => $duration,
                                        genre       => $init{genre},
                                        album       => $init{album},
                                        comment     => $init{comment},
@@ -780,6 +844,123 @@ sub input_file {
 
   return $self->{'input_file'} = $file if defined($file);
   return $self->{'input_file'};
+}
+
+=head2 input_url()
+
+=over
+
+=item Usage
+
+ $obj->input_url();        #get existing value
+
+ $obj->input_url($newval); #set new value
+
+=item Function
+
+Holds URL of a file for input and processing.  This get/setter
+is used in L</init()> to populate L</input_file()>.
+
+=item Returns
+
+value of input_url (a scalar)
+
+=item Arguments
+
+=over
+
+=item (optional) on set, a scalar
+
+=back
+
+=back
+
+=cut
+
+sub input_url {
+  my $self = shift;
+  my $file = shift;
+
+  return $self->{'input_url'} = $file if defined($file);
+  return $self->{'input_url'};
+}
+
+=head2 input_url_max_size()
+
+=over
+
+=item Usage
+
+ $obj->input_url_max_size();        #get existing value
+
+ $obj->input_url_max_size($newval); #set new value
+
+=item Function
+
+Number of bytes to download from </input_url()>.  Note that a
+second HEAD request is made to the server to determine the true
+file size by inspecting the B<Content-Length> header.
+
+=item Returns
+
+value of input_url_max_size (a scalar)
+
+=item Arguments
+
+=over
+
+=item (optional) on set, a scalar
+
+=back
+
+=back
+
+=cut
+
+sub input_url_max_size {
+  my $self = shift;
+  my $file = shift;
+
+  return $self->{'input_url_max_size'} = $file if defined($file);
+  return $self->{'input_url_max_size'};
+}
+
+=head2 input_url_referrer()
+
+=over
+
+=item Usage
+
+ $obj->input_url_referrer();        #get existing value
+
+ $obj->input_url_referrer($newval); #set new value
+
+=item Function
+
+URL to use as referrer when GETting L</input_url()>.
+
+=item Returns
+
+value of input_url_referrer (a scalar)
+
+=item Arguments
+
+=over
+
+=item (optional) on set, a scalar
+
+=back
+
+=back
+
+=cut
+
+sub input_url_referrer {
+  my $self = shift;
+  my $file = shift;
+
+  return $self->{'input_url_referrer'} = $file if defined($file);
+  return $self->{'input_url_referrer'};
 }
 
 =head2 toggle_stderr()
