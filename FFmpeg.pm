@@ -152,13 +152,13 @@ package FFmpeg;
 use strict;
 use vars qw($VERSION);
 
-$VERSION = '0.03';
+$VERSION = '5704';
 
 use Data::Dumper;
 use File::Temp qw(tempfile);
 use HTTP::Request;
 use LWP::UserAgent;
-use Time::Piece;
+#use Time::Piece;
 
 use FFmpeg::Codec;
 use FFmpeg::Stream::Audio;
@@ -272,6 +272,7 @@ sub init {
     warn "input_url and input_file both defined, using input_file"
   } elsif($self->input_url){
     my($fh,$file) = tempfile(CLEANUP=>1);
+#warn $file;
     my $ua1 = LWP::UserAgent->new();
     $ua1->max_size($self->input_url_max_size);
     my $req = HTTP::Request->new('GET',$self->input_url);
@@ -289,7 +290,7 @@ sub init {
         $req->header('Referer' => $self->input_url_referrer()) if $self->input_url_referrer();
         my $res = $ua2->request($req);
         if($res->is_success){
-          $self->{'input_url_head_size'} = $res->header('Content-Length');
+          $self->{'input_url_content_length'} = $res->header('Content-Length');
         } else {
           warn "problem HEADing ".$self->input_url.', got error: '.$res->status_line;
         }
@@ -341,23 +342,24 @@ sub create_streamgroup {
   my ($self) = @_;
 
   if(!$self->input_file){
-#    warn "no valid input_file, refusing to construct an FFmpeg::StreamGroup";
+    warn "no valid input_file, refusing to construct an FFmpeg::StreamGroup";
     return undef;
   }
 
   my $avfc = $self->_init_AVFormatContext;
 
   my $i = $self->_init_streamgroup($avfc,$self->input_file);
+
   my %init = ();
   if($i){
     %init = %{ $i }
   } else {
-#    warn "failed to initialize file ". $self->input_url || $self->input_file;
+    warn "failed to initialize file ". $self->input_url || $self->input_file;
     return undef;
   }
+#warn "D";
 
-  return undef if $init{'error'};
-  #die $init{'error'} if $init{'error'};
+  warn "unknown initialization error: ".$init{'error'} and return undef if $init{'error'};
 
   my($width,$height);
   if(ref($init{stream}) eq 'HASH'){ #has streams
@@ -370,7 +372,6 @@ sub create_streamgroup {
     }
   }
 
-  #frame rate calculation courtesy of FIXME
   my $frame_rate;
   if(ref($init{stream}) eq 'HASH') {
     foreach my $stream (keys %{ $init{stream} }) {
@@ -387,6 +388,7 @@ sub create_streamgroup {
     }
   }
 
+  ###FIXME clean this up, i have no idea what it does anymore!
   my $nullsite = index($init{format},chr(0));
   if($nullsite != -1){
     warn "HACK WTF IS GOING ON HERE?";
@@ -396,19 +398,28 @@ sub create_streamgroup {
     warn $init{format};
   }
 
+  my($duration,$h,$m,$s) = ($init{duration},0,0,0);
+  $duration ||= 0;
+  $init{AV_TIME_BASE} ||= 1_000_000; #1,000,000 from avcodec.h
+
   #time parsing is borked on max_size requests for some reason
-  my $duration;
-  if($self->{input_url_head_size}){
-    $duration = Time::Piece->strptime('00:00:00','%T');
-  } else {
-    $init{duration} ||= '00:00:00';
-    $duration = Time::Piece->strptime($init{duration},'%T');
+  if($self->{input_url_max_size}){
+    if($init{bit_rate}){ #we can infer duration
+      $duration = int(10 * ($self->{input_url_content_length} / $init{bit_rate})); #FIXME right?
+
+      $s = $duration ;#/ 100_000; #FIXME is this right?
+      $m = int($duration / 60);
+      $s %= 60;
+      $h = int($m / 60);
+      $m %= 60;
+    }
   }
 
   #this special case uses the Content-Length header to set size.
-  $init{file_size} = $self->{input_url_head_size} if $self->{input_url_head_size};
+  $init{file_size} = $self->{input_url_max_size} if $self->{input_url_max_size};
 
   #warn "\n".Data::Dumper::Dumper(\%init)."\n";
+  #warn "A $duration $init{duration} $init{AV_TIME_BASE}";
 
   my $group = FFmpeg::StreamGroup->new(
                                        file_size   => $init{file_size},
@@ -417,7 +428,7 @@ sub create_streamgroup {
                                        track       => $init{track},
                                        copyright   => $init{copyright},
                                        author      => $init{author},
-                                       duration    => $duration,
+                                       duration    => ($duration / $init{AV_TIME_BASE}),
                                        genre       => $init{genre},
                                        album       => $init{album},
                                        comment     => $init{comment},
@@ -450,12 +461,14 @@ sub create_streamgroup {
 
     my $frame_rate = $init{stream}{$s}{frame_rate};
     if($init{stream}{$s}{real_frame_rate_base} > 0 and defined $init{stream}{$s}{real_frame_rate}){
-      $frame_rate = $init{stream}{$s}{real_frame_rate} / $init{stream}{$s}{real_frame_rate_base};
+      #$frame_rate = $init{stream}{$s}{real_frame_rate} / $init{stream}{$s}{real_frame_rate_base};
+      $frame_rate = $init{stream}{$s}{real_frame_rate};
     }
 
     my $streamclass = 'FFmpeg::Stream::Unknown';
 
     my $codec_id = $init{stream}{$s}{codec_id};
+
     if(defined($self->codec($codec_id)) && $self->codec($codec_id)->is_video){
       $streamclass = 'FFmpeg::Stream::Video';
     } elsif(defined($self->codec($codec_id)) && $self->codec($codec_id)->is_audio){
@@ -463,21 +476,20 @@ sub create_streamgroup {
     }
 
     my $stream = $streamclass->new(
-                                   bit_rate => $init{stream}{$s}{bit_rate},
-                                   channels => $init{stream}{$s}{channels},
-                                   codec => $self->codec($init{stream}{$s}{codec_id}),
-                                   codec_tag => $init{stream}{$s}{codec_tag},
-                                   duration => $init{stream}{$s}{duration}, #FIXME Time::Piece
-                                   fourcc => join('',map {chr($_)} (unpack('c*',pack('I',$init{stream}{$s}{codec_tag})))),
-                                   frame_rate => $frame_rate,
-                                   height => $init{stream}{$s}{height},
-                                   quality => $init{stream}{$s}{quality},
+                                   bit_rate      => $init{stream}{$s}{bit_rate},
+                                   channels      => $init{stream}{$s}{channels},
+                                   codec         => $self->codec($init{stream}{$s}{codec_id}),
+                                   codec_tag     => $init{stream}{$s}{codec_tag},
+                                   duration      => ($init{stream}{$s}{duration} / $init{AV_TIME_BASE}), ###FIXME is this correct to divide?
+                                   fourcc        => join('',map {chr($_)} (unpack('c*',pack('I',$init{stream}{$s}{codec_tag})))),
+                                   frame_rate    => $frame_rate,
+                                   height        => $init{stream}{$s}{height},
+                                   quality       => $init{stream}{$s}{quality},
                                    sample_format => $init{stream}{$s}{sample_format},
-                                   sample_rate => $init{stream}{$s}{sample_rate},
-                                   start_time => $init{stream}{$s}{start_time}, #FIXME Time::Piece
-                                   width => $init{stream}{$s}{width},
+                                   sample_rate   => $init{stream}{$s}{sample_rate},
+                                   start_time    => ($init{stream}{$s}{start_time} / $init{AV_TIME_BASE}), ###FIXME is this correct to divide?
+                                   width         => $init{stream}{$s}{width},
                                   );
-
     $group->_add_stream($stream);
   }
 
@@ -586,6 +598,24 @@ sub codecs {
   return values %{ $self->{'_codecs'} };
 }
 
+=head2 format_duration_HMS()
+
+FIXME document this
+
+=cut
+
+sub format_duration_HMS {
+  my($self,$duration) = @_;
+  #warn join "\n",caller();
+  my($h,$m,$s) = (0,0,0);
+  $s = $duration ;#/ 100_000; #FIXME is this right?
+  $m = int($duration / 60);
+  $s %= 60;
+  $h = int($m / 60);
+  $m %= 60;
+  return sprintf('%02d:%02d:%02d',$h,$m,$s);
+}
+
 =head2 create_timepiece()
 
 =over
@@ -622,7 +652,8 @@ of interest
 
 sub create_timepiece {
   my ($self,$time) = @_;
-
+warn join "\n",caller();
+warn $time;
   if(ref($time) and $time->isa('Time::Piece')){
     return $time;
   } else {
@@ -714,6 +745,43 @@ sub file_formats {
   }
 
   return values %{ $self->{'_file_formats'} };
+}
+
+=head2 force_format()
+
+=over
+
+=item Usage
+
+ $obj->force_format('mpeg');
+
+=item Function
+
+Force parsing of L</input_file()> or L</input_url()> as a file
+of this format.  Useful for file fragments, or otherwise mangled
+files
+
+=item Returns
+
+n/a
+
+=item Arguments
+
+=over
+
+=item a format name.  FIXME should be an object.
+
+=back
+
+=back
+
+=cut
+
+sub force_format {
+  my $self = shift;
+  my $format = shift;
+  $self->_set_format($format) if $format;
+
 }
 
 =head2 image_format()

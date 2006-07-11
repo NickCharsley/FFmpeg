@@ -1,5 +1,5 @@
 BEGIN {
-  use Test::More tests => 80;
+  use Test::More tests => 82;
   use strict;
   use_ok('FFmpeg');
   use_ok('Data::Dumper');
@@ -7,14 +7,13 @@ BEGIN {
 }
 
 my $fname = "eg/t1.m2v";
-#my $fname = "/home/allenday/cvsroot/Apache-Jukebox/t/htdocs/media/video/Sealab/Sealab_2021_103_I_Robot.avi";
 
 ok(-d catfile('eg','test') || mkdir(catfile('eg','test')) , 'mkdir eg/test');
 
 ok(my $ff = FFmpeg->new(input_file => $fname)      , 'ff object created successfully');
-ok($ff->isa('FFmpeg')                              , 'object correct type');
+ok($ff->isa('FFmpeg')                              , 'object correct type A');
 ok(my $sg = $ff->create_streamgroup                , 'streamgroup created successfully');
-ok($sg->isa('FFmpeg::StreamGroup')                 , 'object correct type');
+ok($sg->isa('FFmpeg::StreamGroup')                 , 'object correct type B');
 
 ok($frame = $sg->capture_frame(offset => '00:00:00'), 'captured frame');
 

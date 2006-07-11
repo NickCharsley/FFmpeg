@@ -26,3 +26,24 @@
 	the real file size so FFMpeg::StreamGroup->duration() still reports
 	the correct value.  this introduces dependency on LWP::UserAgent and
 	HTTP::Request to the library.
+
+0.04	- added force_format() method.
+	- removed Time::Piece dependency.  duration() now returns fractional
+	seconds for the duration of the stream or stream group.  call
+	duration(format => 'HMS') to get a HH::MM::SS formatted string.  i
+	may at some point add support for a 'Time::Piece' and other formats.
+	- corrected a duration bug that reported incorrect durations for long
+	streams (sprintf unsigned int instead of signed int)
+
+###TODO###
+fix audio file (mp3 anyway) duration reporting.  there may be
+a bug in FFmpeg, a bug in Time::Piece, or a bug in mod_perl with
+initializing malloc()ed memory.  i have only observed the bug running
+under mod_perl, so i still need to do some isolation debugging.
+
+FFmpeg::ImageFormat seems to have lost most of its formats (all except sgi,
+gif, and yuv).  This seems to be related to the changes that were made to
+capture_frames() requiring a .pnm extension on the tempfiles, and ffmpeg
+automatically detecting what image format was desired... need to figure out
+how to get the available image formats into perl again.  they are still
+available as shown by running 'ffmpeg -formats'.

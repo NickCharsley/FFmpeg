@@ -408,17 +408,18 @@ sub data_offset {
 
 =item Usage
 
- $obj->duration();        #get existing Time::Piece
+ $obj->duration();        #get stream duration in seconds
+ $obj->duration(format=>'HMS'); #get existing value in HH::MM::SS format
 
 =item Function
 
-duration of the stream group.  this is
-initialized to '00:00:00' if duration information
+duration of the stream group in seconds.  this is
+initialized to 0 if duration information
 is for some reason unable from the streamgroup.
 
 =item Returns
 
-an object of class Time::Piece
+value of duration (a float), or a formatted time string.
 
 =item Arguments
 
@@ -429,9 +430,27 @@ none, read only
 =cut
 
 sub duration {
-  my($self,$obj) = @_;
+  my $self = shift;
+  my %arg = @_;
+
+  if(defined($arg{format})){
+    if($arg{format} eq 'HMS'){
+      return $self->_ffmpeg->format_duration_HMS($self->{'duration'});
+    }
+  }
 
   return $self->{'duration'};
+}
+
+=head2 duration_HMS()
+
+returns L<duration()> in HH:MM:SS.uuuu format
+
+=cut
+
+sub duration_HMS {
+  my $self = shift;
+  return $self->_ffmpeg->format_duration_HMS( $self->duration() );
 }
 
 =head2 file_size()
@@ -816,8 +835,7 @@ the format requested
 =item frame_rate (optional)
 
 affect how many frames/second are captured.  for instance, a
-value of 0.016 will result in one roughly frame per minute.  FIXME, this
-argument should really be a Time::HiRes object.
+value of 0.016 will result in one roughly frame per minute.
 
 =item frame_size (optional)
 
@@ -830,13 +848,14 @@ path to filename where captured frame willbe written.  defaults
 to an anonymous tempfile created using L<File::Temp|File::Temp> that is
 deleted upon program termination
 
-=item recording_time (optional, B<IMPORTANT>)
+=item duration (optional, B<IMPORTANT>)
 
-A Time::Piece object which determines how many seconds will be recorded.
+A string specifying how many seconds will be recorded.  defaults to 00:00:00.001
+(typically resulting in 1 frame captured).
 
 =item offset (optional)
 
-a L<Time::Piece|Time::Piece> object or string in HH:MM:SS format specifying
+a string in HH:MM:SS format specifying
 offset at which to capture the frame. defaults to 00:00:00
 
 =back
@@ -862,18 +881,17 @@ sub capture_frames {
   #
   #setup parameters for frame capture
   #
-  #warn $self->url;
   $self->_ffmpeg->_set_input_file($self->url);
 
   if($arg{frame_rate}){
     $self->_ffmpeg->_set_frame_rate($arg{frame_rate});
   }
 
-  $self->_ffmpeg->_set_format('imagepipe');
+  $self->_ffmpeg->_set_format('image2pipe');
 
   my($fh, $fn);
   if(!defined($arg{output_file})){
-    ($fh, $fn) = tempfile(UNLINK => 1);
+    ($fh, $fn) = tempfile(UNLINK => 1, SUFFIX => '.ppm');
   } else {
     $fn = $arg{output_file};
   }
@@ -883,41 +901,17 @@ sub capture_frames {
   }
 
   if(defined($arg{offset})){
-    my $t = $self->_ffmpeg->create_timepiece($arg{offset});
-
-    $self->_ffmpeg->_set_start_time(
-                                    sprintf(
-                                            "%02d:%02d:%02d",
-                                            $t->hour,
-                                            $t->min,
-                                            $t->sec
-                                           )
-                                   );
+    $self->_ffmpeg->_set_start_time($arg{offset});
   } else {
     $self->_ffmpeg->_set_start_time('00:00:00');
   }
 
   if(defined($arg{duration})){
     my $t = $arg{duration};
-
-    if(!ref($t)){
-      $self->_ffmpeg->_set_recording_time($arg{duration}); #FIXME
-    } else {
-
-      $self->_ffmpeg->_set_recording_time(
-                                          sprintf(
-                                                  "%02d:%02d:%02d",
-                                                  $t->hour,
-                                                  $t->min,
-                                                  $t->sec
-                                                 )
-                                         );
-    }
+    $self->_ffmpeg->_set_recording_time($arg{duration});
   } else {
     #FIXME add warning, this is a full transcode
   }
-
-  $self->_ffmpeg->_set_image_format('ppm');
 
   $self->_ffmpeg->_set_output_file($fn);
 

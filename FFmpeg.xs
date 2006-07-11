@@ -344,19 +344,23 @@ _init_streamgroup(self, ic_addr, filename)
 
 	if (ic->duration != AV_NOPTS_VALUE) {
 
-		int hours, mins, secs, dsecs;
-		secs  = ic->duration / AV_TIME_BASE;
-		dsecs = ic->duration % AV_TIME_BASE;
-		mins  = secs / 60;
-		secs %= 60;
-		hours = mins / 60;
-		mins %= 60;
+        //
+        // moving away from Time::Piece, let's try giving back the raw AVFormatContext duration
+        // and time base (inverse seconds) to perl, and manipulating in there.  i suspect
+        // this HH:MM:SS formatting is somehow causing malloc() unitialized memory problems under
+        // mod_perl.
+        //
+		//int hours, mins, secs, dsecs;
+		//secs  = ic->duration / AV_TIME_BASE;
+		//dsecs = ic->duration % AV_TIME_BASE;
+		//mins  = secs / 60;
+		//secs %= 60;
+		//hours = mins / 60;
+		//mins %= 60;
+		//hv_store(hash,"duration",strlen("duration"), newSVpvf("%02d:%02d:%02d", hours, mins, secs), 0);
 
-		/* Time::Piece doesn't like usecs.
-		hv_store(hash,"duration",strlen("duration"),
-		newSVpvf("%02d:%02d:%02d.%01d", hours, mins, secs, (10 * dsecs) / AV_TIME_BASE),0); */
-
-		hv_store(hash,"duration",strlen("duration"), newSVpvf("%02d:%02d:%02d", hours, mins, secs), 0);
+        hv_store(hash,"duration",strlen("duration"),newSVpvf("%u",ic->duration), 0);
+        hv_store(hash,"AV_TIME_BASE",strlen("AV_TIME_BASE"),newSViv(AV_TIME_BASE), 0);
 	}
 
 	hv_store(hash,"bit_rate",strlen("bit_rate"), newSViv(ic->bit_rate),0);
@@ -368,44 +372,49 @@ _init_streamgroup(self, ic_addr, filename)
 		HV *tstream = newHV();
 
 		char stream_name[9];
-		sprintf(stream_name, "stream%02d", i);
+		snprintf(stream_name, 10, "stream%02d", i);
 
 		hv_store(stream,stream_name,strlen(stream_name), newRV_noinc((SV *) tstream),0);
 
-		AVCodecContext *codec = &st->codec;
+		AVCodecContext *ctx = st->codec;
+		AVCodec *codec = ctx->codec;
 
 		/* AVFormatContext values */
 		hv_store(tstream,"index",strlen("index"), newSViv(st->index),0);
 		hv_store(tstream,"id",strlen("id"), newSViv(st->id),0);
-		hv_store(tstream,"real_frame_rate",strlen("real_frame_rate"), newSViv(st->r_frame_rate),0);
-		hv_store(tstream,"real_frame_rate_base",strlen("real_frame_rate_base"), newSViv(st->r_frame_rate_base),0);
+		hv_store(tstream,"real_frame_rate",strlen("real_frame_rate"), newSVnv(av_q2d(st->r_frame_rate)),0);
+//fprintf(stderr,"A %f\n", av_q2d(st->r_frame_rate));
+		hv_store(tstream,"real_frame_rate_base",strlen("real_frame_rate_base"), newSVnv(av_q2d(st->time_base)),0);
+//fprintf(stderr,"B %f\n", av_q2d(st->time_base));
+		//hv_store(tstream,"real_frame_rate_base",strlen("real_frame_rate_base"), newSViv(av_q2d(st->time_base)),0);
 		hv_store(tstream,"start_time",strlen("start_time"), newSViv(st->start_time),0);
 		hv_store(tstream,"duration",strlen("duration"), newSViv(st->duration),0);
 
 		hv_store(tstream,"quality",strlen("quality"), newSVnv(st->quality),0);
 
 		/* AVCodecContext values */
-		hv_store(tstream,"bit_rate",strlen("bit_rate"), newSViv(codec->bit_rate),0);
-		hv_store(tstream,"bit_rate_tolerance",strlen("bit_rate_tolerance"), newSViv(codec->bit_rate_tolerance),0);
-		hv_store(tstream,"frame_rate",strlen("frame_rate"), newSViv(codec->frame_rate),0);
-		hv_store(tstream,"width",strlen("width"), newSViv(codec->width),0);
-		hv_store(tstream,"height",strlen("height"), newSViv(codec->height),0);
-		hv_store(tstream,"sample_rate",strlen("sample_rate"), newSViv(codec->sample_rate),0);
-		hv_store(tstream,"channels",strlen("channels"), newSViv(codec->channels),0);
-		hv_store(tstream,"sample_format",strlen("sample_format"), newSViv(codec->sample_fmt),0);
+		hv_store(tstream,"bit_rate",strlen("bit_rate"), newSViv(ctx->bit_rate),0);
+		hv_store(tstream,"bit_rate_tolerance",strlen("bit_rate_tolerance"), newSViv(ctx->bit_rate_tolerance),0);
+//fprintf(stderr,"C %f\n", av_q2d(ctx->time_base));
+		hv_store(tstream,"frame_rate",strlen("frame_rate"), newSVnv(av_q2d(ctx->time_base)),0);
+		hv_store(tstream,"width",strlen("width"), newSViv(ctx->width),0);
+		hv_store(tstream,"height",strlen("height"), newSViv(ctx->height),0);
+		hv_store(tstream,"sample_rate",strlen("sample_rate"), newSViv(ctx->sample_rate),0);
+		hv_store(tstream,"channels",strlen("channels"), newSViv(ctx->channels),0);
+		hv_store(tstream,"sample_format",strlen("sample_format"), newSViv(ctx->sample_fmt),0);
 
 		/* do we want to initalize these???
-		hv_store(tstream,"frame_size",strlen("frame_size"), newSViv(codec->frame_size),0);
-		hv_store(tstream,"frame_number",strlen("frame_number"), newSViv(codec->frame_number),0);
-		hv_store(tstream,"real_pict_number",strlen("real_pict_number"), newSViv(codec->real_pict_num),0);
+		hv_store(tstream,"frame_size",strlen("frame_size"), newSViv(ctx->frame_size),0);
+		hv_store(tstream,"frame_number",strlen("frame_number"), newSViv(ctx->frame_number),0);
+		hv_store(tstream,"real_pict_number",strlen("real_pict_number"), newSViv(ctx->real_pict_num),0);
 
-		hv_store(tstream,"codec_name",strlen("codec_name"), newSVpvf("%s",codec->codec_name),0); */
+		hv_store(tstream,"codec_name",strlen("codec_name"), newSVpvf("%s",ctx->codec_name),0); */
 
-		hv_store(tstream,"codec_id",strlen("codec_id"), newSViv(codec->codec_id),0);
-		hv_store(tstream,"codec_tag",strlen("codec_tag"), newSVuv(codec->codec_tag),0);
+		hv_store(tstream,"codec_id",strlen("codec_id"), newSViv(ctx->codec_id),0);
+		hv_store(tstream,"codec_tag",strlen("codec_tag"), newSVuv(ctx->codec_tag),0);
 
 		/* PixelFormat - initialize?
-		hv_store(tstream,"color_table_id",strlen("color_table_id"), newSViv(codec->color_table_id),0); */
+		hv_store(tstream,"color_table_id",strlen("color_table_id"), newSViv(ctx->color_table_id),0); */
 	}
 
 	RETVAL = hash;

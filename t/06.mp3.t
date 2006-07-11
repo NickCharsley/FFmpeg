@@ -1,4 +1,4 @@
-use Test::More tests => 23;
+use Test::More tests => 22;
 use FFmpeg;
 use Data::Dumper;
 
@@ -9,8 +9,7 @@ ok($ff->isa('FFmpeg')                         , 'object correct type');
 ok(my $sg = $ff->create_streamgroup           , 'streamgroup object created successfully');
 ok($sg->isa('FFmpeg::StreamGroup')            , 'object correct type');
 
-ok($sg->duration->isa('Time::Piece')          , 'object correct type');
-is($sg->duration->hms, '00:00:01'             , 'streamgroup duration correct');
+like($sg->duration, qr/^1/                    , 'streamgroup duration correct');
 is(scalar($sg->streams), 1                    , 'stream count correct');
 is(scalar(grep {$_->isa('FFmpeg::Stream::Video')} $sg->streams), 0, 'video stream count correct');
 is(scalar(grep {$_->isa('FFmpeg::Stream::Audio')} $sg->streams), 1, 'audio stream count correct');

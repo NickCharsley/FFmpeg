@@ -292,16 +292,17 @@ sub codec_tag {
 =item Usage
 
   $obj->duration(); #get existing value
+  $obj->duration(format=>'HMS'); #get existing value in HH::MM::SS format
 
 =item Function
 
-duration of stream in microseconds.  a stream may not have the
+duration of stream in seconds.  a stream may not have the
 same duration as its L<FFmpeg::StreamGroup|FFmpeg::StreamGroup>
 container.
 
 =item Returns
 
-value of duration (a scalar) FIXME should be Time::Piece
+value of duration (a float), or a formatted time string.
 
 =item Arguments
 
@@ -313,6 +314,13 @@ none, read-only
 
 sub duration {
   my $self = shift;
+  my %arg = @_;
+
+  if(defined($arg{format})){
+    if($arg{format} eq 'HMS'){
+      return $self->_ffmpeg->format_duration_HMS($self->{'duration'});
+    }
+  }
 
   return $self->{'duration'};
 }
@@ -362,7 +370,7 @@ container.
 
 =item Returns
 
-value of start_time (a scalar) #FIXME Time::Piece
+value of start_time (a float)
 
 =item Arguments
 

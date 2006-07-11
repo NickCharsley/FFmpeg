@@ -142,7 +142,7 @@ this is not comparable between different codecs.
 
 =item Returns
 
-value of quality (a scalar) #FIXME Time::Piece
+value of quality (a scalar)
 
 =item Arguments
 
