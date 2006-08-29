@@ -19,11 +19,12 @@
 #define HAVE_AV_CONFIG_H
 #include <limits.h>
 #include "avformat.h"
+#include "swscale.h"
 #include "framehook.h"
 #include "dsputil.h"
 #include "opt.h"
 
-#ifndef CONFIG_WIN32
+#ifndef __MINGW32__
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
@@ -159,7 +160,7 @@ static int me_penalty_compensation= 256;
 static int frame_skip_threshold= 0;
 static int frame_skip_factor= 0;
 static int frame_skip_exp= 0;
-extern int loop_input; /* currently a hack */
+static int loop_input = 0;
 static int loop_output = AVFMT_NOOUTPUTLOOP;
 static int genpts = 0;
 static int qp_hist = 0;
@@ -246,6 +247,8 @@ static int limit_filesize = 0; //
 static int pgmyuv_compatibility_hack=0;
 static int dts_delta_threshold = 10;
 
+static int sws_flags = SWS_BICUBIC;
+
 const char **opt_names=NULL;
 int opt_name_count=0;
 AVCodecContext *avctx_opts;
@@ -273,7 +276,8 @@ typedef struct AVOutputStream {
     /* video only */
     int video_resample;
     AVFrame pict_tmp;      /* temporary image for resampling */
-    ImgReSampleContext *img_resample_ctx; /* for image resampling */
+    struct SwsContext *img_resample_ctx; /* for image resampling */
+    int resample_height;
 
     int video_crop;
     int topBand;             /* cropping area sizes */
@@ -317,7 +321,7 @@ typedef struct AVInputFile {
     int nb_streams;       /* nb streams we are aware of */
 } AVInputFile;
 
-#ifndef CONFIG_WIN32
+#ifndef __MINGW32__
 
 /* init terminal so that we can grab keys */
 static struct termios oldtty;
@@ -728,12 +732,10 @@ static void do_video_out(AVFormatContext *s,
 {
     int nb_frames, i, ret;
     AVFrame *final_picture, *formatted_picture, *resampling_dst, *padding_src;
-    AVFrame picture_format_temp, picture_crop_temp, picture_pad_temp;
+    AVFrame picture_crop_temp, picture_pad_temp;
     uint8_t *buf = NULL, *buf1 = NULL;
     AVCodecContext *enc, *dec;
-    enum PixelFormat target_pixfmt;
 
-    avcodec_get_frame_defaults(&picture_format_temp);
     avcodec_get_frame_defaults(&picture_crop_temp);
     avcodec_get_frame_defaults(&picture_pad_temp);
 
@@ -770,38 +772,14 @@ static void do_video_out(AVFormatContext *s,
     if (nb_frames <= 0)
         return;
 
-    /* convert pixel format if needed */
-    target_pixfmt = ost->video_resample ? PIX_FMT_YUV420P : enc->pix_fmt;
-    if (dec->pix_fmt != target_pixfmt) {
-        int size;
-
-        /* create temporary picture */
-        size = avpicture_get_size(target_pixfmt, dec->width, dec->height);
-        buf = av_malloc(size);
-        if (!buf)
-            return;
-        formatted_picture = &picture_format_temp;
-        avpicture_fill((AVPicture*)formatted_picture, buf, target_pixfmt, dec->width, dec->height);
-
-        if (img_convert((AVPicture*)formatted_picture, target_pixfmt,
-                        (AVPicture *)in_picture, dec->pix_fmt,
-                        dec->width, dec->height) < 0) {
-
-            if (verbose >= 0)
-                fprintf(stderr, "pixel format conversion not handled\n");
-
-            goto the_end;
-        }
-    } else {
-        formatted_picture = in_picture;
-    }
-
     if (ost->video_crop) {
-        if (img_crop((AVPicture *)&picture_crop_temp, (AVPicture *)formatted_picture, target_pixfmt, ost->topBand, ost->leftBand) < 0) {
+        if (img_crop((AVPicture *)&picture_crop_temp, (AVPicture *)in_picture, dec->pix_fmt, ost->topBand, ost->leftBand) < 0) {
             av_log(NULL, AV_LOG_ERROR, "error cropping picture\n");
             goto the_end;
         }
         formatted_picture = &picture_crop_temp;
+    } else {
+        formatted_picture = in_picture;
     }
 
     final_picture = formatted_picture;
@@ -810,7 +788,7 @@ static void do_video_out(AVFormatContext *s,
     if (ost->video_pad) {
         final_picture = &ost->pict_tmp;
         if (ost->video_resample) {
-            if (img_crop((AVPicture *)&picture_pad_temp, (AVPicture *)final_picture, target_pixfmt, ost->padtop, ost->padleft) < 0) {
+            if (img_crop((AVPicture *)&picture_pad_temp, (AVPicture *)final_picture, enc->pix_fmt, ost->padtop, ost->padleft) < 0) {
                 av_log(NULL, AV_LOG_ERROR, "error padding picture\n");
                 goto the_end;
             }
@@ -818,36 +796,11 @@ static void do_video_out(AVFormatContext *s,
         }
     }
 
-    /* XXX: resampling could be done before raw format conversion in
-       some cases to go faster */
-    /* XXX: only works for YUV420P */
     if (ost->video_resample) {
         padding_src = NULL;
         final_picture = &ost->pict_tmp;
-        img_resample(ost->img_resample_ctx, (AVPicture *)resampling_dst, (AVPicture*)formatted_picture);
-    }
-
-    if (enc->pix_fmt != target_pixfmt) {
-        int size;
-
-        av_free(buf);
-        /* create temporary picture */
-        size = avpicture_get_size(enc->pix_fmt, enc->width, enc->height);
-        buf = av_malloc(size);
-        if (!buf)
-            return;
-        final_picture = &picture_format_temp;
-        avpicture_fill((AVPicture*)final_picture, buf, enc->pix_fmt, enc->width, enc->height);
-
-        if (img_convert((AVPicture*)final_picture, enc->pix_fmt,
-                        (AVPicture*)&ost->pict_tmp, target_pixfmt,
-                        enc->width, enc->height) < 0) {
-
-            if (verbose >= 0)
-                fprintf(stderr, "pixel format conversion not handled\n");
-
-            goto the_end;
-        }
+        sws_scale(ost->img_resample_ctx, formatted_picture->data, formatted_picture->linesize,
+              0, ost->resample_height, resampling_dst->data, resampling_dst->linesize);
     }
 
     if (ost->video_pad) {
@@ -884,13 +837,15 @@ static void do_video_out(AVFormatContext *s,
             /* better than nothing: use input picture interlaced
                settings */
             big_picture.interlaced_frame = in_picture->interlaced_frame;
-//perl-FFmpeg
-//            if(avctx_opts->flags & (CODEC_FLAG_INTERLACED_DCT|CODEC_FLAG_INTERLACED_ME)){
-//                if(top_field_first == -1)
-//                    big_picture.top_field_first = in_picture->top_field_first;
-//                else
-//                    big_picture.top_field_first = top_field_first;
-//            }
+//allenday
+#if 0
+            if(avctx_opts->flags & (CODEC_FLAG_INTERLACED_DCT|CODEC_FLAG_INTERLACED_ME)){
+                if(top_field_first == -1)
+                    big_picture.top_field_first = in_picture->top_field_first;
+                else
+                    big_picture.top_field_first = top_field_first;
+            }
+#endif
 
             /* handles sameq here. This is not correct because it may
                not be a global option */
@@ -1681,7 +1636,8 @@ static int av_encode(AVFormatContext **output_files,
                                 (frame_padleft + frame_padright)) ||
                         (codec->height != icodec->height -
                                 (frame_topBand  + frame_bottomBand) +
-                                (frame_padtop + frame_padbottom)));
+                                (frame_padtop + frame_padbottom)) ||
+                        (codec->pix_fmt != icodec->pix_fmt));
                 if (ost->video_crop) {
                     ost->topBand = frame_topBand;
                     ost->leftBand = frame_leftBand;
@@ -1700,16 +1656,23 @@ static int av_encode(AVFormatContext **output_files,
                 }
                 if (ost->video_resample) {
                     avcodec_get_frame_defaults(&ost->pict_tmp);
-                    if( avpicture_alloc( (AVPicture*)&ost->pict_tmp, PIX_FMT_YUV420P,
+                    if( avpicture_alloc( (AVPicture*)&ost->pict_tmp, codec->pix_fmt,
                                          codec->width, codec->height ) )
                         goto fail;
 
-                    ost->img_resample_ctx = img_resample_init(
+                    ost->img_resample_ctx = sws_getContext(
+                            icodec->width - (frame_leftBand + frame_rightBand),
+                            icodec->height - (frame_topBand + frame_bottomBand),
+                            icodec->pix_fmt,
                             codec->width - (frame_padleft + frame_padright),
                             codec->height - (frame_padtop + frame_padbottom),
-                            icodec->width - (frame_leftBand + frame_rightBand),
-                            icodec->height - (frame_topBand + frame_bottomBand));
-
+                            codec->pix_fmt,
+                            sws_flags, NULL, NULL, NULL);
+                    if (ost->img_resample_ctx == NULL) {
+                        fprintf(stderr, "Cannot get resampling context\n");
+                        exit(1);
+                    }
+                    ost->resample_height = icodec->height - (frame_topBand + frame_bottomBand);
                 }
                 ost->encoding_needed = 1;
                 ist->decoding_needed = 1;
@@ -1796,8 +1759,8 @@ static int av_encode(AVFormatContext **output_files,
             fprintf(stderr, "\n");
         }
     }
-
     /* open each encoder */
+
     for(i=0;i<nb_ostreams;i++) {
         ost = ost_table[i];
         if (ost->encoding_needed) {
@@ -1897,7 +1860,7 @@ static int av_encode(AVFormatContext **output_files,
         }
     }
 
-#ifndef CONFIG_WIN32
+#ifndef __MINGW32__
     if ( !using_stdin && verbose >= 0) {
         fprintf(stderr, "Press [q] to stop encoding\n");
         url_set_interrupt_cb(decode_interrupt_cb);
@@ -1992,7 +1955,7 @@ static int av_encode(AVFormatContext **output_files,
         if (ist->discard)
             goto discard_packet;
 
-//        fprintf(stderr, "next:%lld dts:%lld off:%lld %d\n", ist->next_pts, pkt.dts, input_files_ts_offset[ist->file_index], ist->st->codec->codec_type);
+        //fprintf(stderr, "next:%lld dts:%lld off:%lld %d\n", ist->next_pts, pkt.dts, input_files_ts_offset[ist->file_index], ist->st->codec->codec_type);
         if (pkt.dts != AV_NOPTS_VALUE && ist->next_pts != AV_NOPTS_VALUE) {
             int64_t delta= av_rescale_q(pkt.dts, ist->st->time_base, AV_TIME_BASE_Q) - ist->next_pts;
             if(ABS(delta) > 1LL*dts_delta_threshold*AV_TIME_BASE && !copy_ts){
@@ -2087,7 +2050,7 @@ static int av_encode(AVFormatContext **output_files,
                                           initialized but set to zero */
                 av_free(ost->pict_tmp.data[0]);
                 if (ost->video_resample)
-                    img_resample_close(ost->img_resample_ctx);
+                    sws_freeContext(ost->img_resample_ctx);
                 if (ost->audio_resample)
                     audio_resample_close(ost->resample);
                 av_free(ost);
@@ -2844,6 +2807,8 @@ static void opt_input_file(const char *filename)
         exit(1);
     }
 
+    ic->loop_input = loop_input;
+
     if(genpts)
         ic->flags|= AVFMT_FLAG_GENPTS;
 
@@ -3074,7 +3039,7 @@ static void new_video_stream(AVFormatContext *oc)
 
         video_enc->width = frame_width + frame_padright + frame_padleft;
         video_enc->height = frame_height + frame_padtop + frame_padbottom;
-        video_enc->sample_aspect_ratio = av_d2q(frame_aspect_ratio*frame_height/frame_width, 255);
+        video_enc->sample_aspect_ratio = av_d2q(frame_aspect_ratio*video_enc->height/video_enc->width, 255);
         video_enc->pix_fmt = frame_pix_fmt;
 
         if(codec && codec->pix_fmts){
@@ -3586,7 +3551,7 @@ static void opt_pass(const char *pass_str)
     do_pass = pass;
 }
 
-#if defined(CONFIG_WIN32) || defined(CONFIG_OS2)
+#if defined(__MINGW32__) || defined(CONFIG_OS2)
 static int64_t getutime(void)
 {
   return av_gettime();
@@ -4300,7 +4265,7 @@ int main(int argc, char **argv)
     powerpc_display_perf_report();
 #endif /* POWERPC_PERFORMANCE_REPORT */
 
-#ifndef CONFIG_WIN32
+#ifndef __MINGW32__
     if (received_sigterm) {
         fprintf(stderr,
             "Received signal %d: terminating.\n",

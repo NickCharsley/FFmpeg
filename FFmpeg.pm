@@ -152,7 +152,7 @@ package FFmpeg;
 use strict;
 use vars qw($VERSION);
 
-$VERSION = '5704';
+$VERSION = '6036';
 
 use Data::Dumper;
 use File::Temp qw(tempfile);
@@ -372,7 +372,7 @@ sub create_streamgroup {
     }
   }
 
-  my $frame_rate;
+  my $video_rate;
   if(ref($init{stream}) eq 'HASH') {
     foreach my $stream (keys %{ $init{stream} }) {
       next unless ref($init{stream}{$stream}) eq 'HASH';
@@ -382,9 +382,9 @@ sub create_streamgroup {
       $fr_base ||= $init{stream}{$stream}{real_frame_rate_base};
 
       if($fr_base > 0){
-        $frame_rate = $fr/$fr_base;
+        $video_rate = $fr/$fr_base;
       }
-      last if defined $frame_rate;
+      last if defined $video_rate;
     }
   }
 
@@ -405,7 +405,7 @@ sub create_streamgroup {
   #time parsing is borked on max_size requests for some reason
   if($self->{input_url_max_size}){
     if($init{bit_rate}){ #we can infer duration
-      $duration = int(10 * ($self->{input_url_content_length} / $init{bit_rate})); #FIXME right?
+      $duration = int(10 * ( ($self->{input_url_content_length} || 0) / $init{bit_rate})); #FIXME is this right?
 
       $s = $duration ;#/ 100_000; #FIXME is this right?
       $m = int($duration / 60);
@@ -435,7 +435,7 @@ sub create_streamgroup {
                                        format      => $self->file_format($init{format}),
                                        url         => $init{url},
                                        year        => $init{year},
-                                       frame_rate  => $frame_rate,
+                                       video_rate  => $video_rate,
                                        width       => $width,
                                        height      => $height,
                                        _ffmpeg     => $self,
@@ -459,10 +459,10 @@ sub create_streamgroup {
 #                                     codec => $self->codec($init{stream}{$s}{codec_id}),
 #                                    );
 
-    my $frame_rate = $init{stream}{$s}{frame_rate};
+    my $video_rate = $init{stream}{$s}{video_rate};
     if($init{stream}{$s}{real_frame_rate_base} > 0 and defined $init{stream}{$s}{real_frame_rate}){
       #$frame_rate = $init{stream}{$s}{real_frame_rate} / $init{stream}{$s}{real_frame_rate_base};
-      $frame_rate = $init{stream}{$s}{real_frame_rate};
+      $video_rate = $init{stream}{$s}{real_frame_rate};
     }
 
     my $streamclass = 'FFmpeg::Stream::Unknown';
@@ -482,7 +482,7 @@ sub create_streamgroup {
                                    codec_tag     => $init{stream}{$s}{codec_tag},
                                    duration      => ($init{stream}{$s}{duration} / $init{AV_TIME_BASE}), ###FIXME is this correct to divide?
                                    fourcc        => join('',map {chr($_)} (unpack('c*',pack('I',$init{stream}{$s}{codec_tag})))),
-                                   frame_rate    => $frame_rate,
+                                   video_rate    => $video_rate,
                                    height        => $init{stream}{$s}{height},
                                    quality       => $init{stream}{$s}{quality},
                                    sample_format => $init{stream}{$s}{sample_format},
@@ -733,12 +733,13 @@ sub file_formats {
 
     foreach my $fname (keys %formats){
       my $f = FFmpeg::FileFormat->new(
-                                             name => $formats{$fname}{name},
-                                             description => $formats{$fname}{description},
-                                             mime_type => $formats{$fname}{mime_type},
-                                             can_read  => ($formats{$fname}{capabilities} =~ /D/ ? 1 : 0),
-                                             can_write => ($formats{$fname}{capabilities} =~ /E/ ? 1 : 0),
-                                            );
+                                      name => $formats{$fname}{name},
+                                      description => $formats{$fname}{description},
+                                      mime_type => $formats{$fname}{mime_type},
+                                      extensions => [ split(',', $formats{$fname}{extensions} || '') ],
+                                      can_read  => ($formats{$fname}{capabilities} =~ /D/ ? 1 : 0),
+                                      can_write => ($formats{$fname}{capabilities} =~ /E/ ? 1 : 0),
+                                     );
 
       $self->{'_file_formats'}{$fname} = $f;
     }
@@ -1072,6 +1073,46 @@ sub toggle_stderr {
   }
 }
 
+=head2 toggle_stdout()
+
+=over
+
+=item Usage
+
+  $obj->toggle_stdout();
+
+=item Function
+
+temporarily remaps STDOUT to /dev/null.  this prevents
+FFmpeg-C internal writes to STDOUT from making through
+the FFmpeg-Perl call to the caller.
+
+=item Returns
+
+n/a
+
+=item Arguments
+
+a true value - silence STDOUT
+a false value - turn STDOUT back on
+
+=back
+
+=cut
+
+sub toggle_stdout {
+  my ($self,$arg) = @_;
+
+  if($arg){
+    open(TOUT,">&STDOUT");
+    close(STDOUT);
+    open(STDOUT,'>/dev/null');
+  } else {
+    close(STDOUT);
+    open(STDOUT,">&TOUT");
+    close(TOUT);
+  }
+}
 
 =head2 verbose()
 

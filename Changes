@@ -35,15 +35,26 @@
 	- corrected a duration bug that reported incorrect durations for long
 	streams (sprintf unsigned int instead of signed int)
 
-###TODO###
-fix audio file (mp3 anyway) duration reporting.  there may be
-a bug in FFmpeg, a bug in Time::Piece, or a bug in mod_perl with
-initializing malloc()ed memory.  i have only observed the bug running
-under mod_perl, so i still need to do some isolation debugging.
+6036
+	- Sync to SVN version 6036
+	- Added ffmpeg.c and config.h to distro, removing the need, in most
+	cases, to define $FFMPEG_ROOT.
+	- Renamed FFmpeg::StreamGroup's frame_rate() to video_rate()
+	- Renamed FFmpeg::StreamGroup's frame_size() to video_geometry()
+	- Added all command line options as comments to FFmpeg.xs.  Serves
+	as a list of features to add to fully implement "ffmpeg" commandline
+	program
+	- Added extensions() method to FFmpeg::FileFormat.  Returns a list
+	of file lowercase file extensions associated with the file format.
+	- Added perl hooks for:
+		* audio_bitrate (-ab)
+		* video_codec (-acodec)
+		* audio_rate (-ar)
+		* video_bitrate (-b)
+		* video_codec (-vcodec)
+	- Added transcode() method to FFmpeg::StreamGroup
 
-FFmpeg::ImageFormat seems to have lost most of its formats (all except sgi,
-gif, and yuv).  This seems to be related to the changes that were made to
-capture_frames() requiring a .pnm extension on the tempfiles, and ffmpeg
-automatically detecting what image format was desired... need to figure out
-how to get the available image formats into perl again.  they are still
-available as shown by running 'ffmpeg -formats'.
+#TODO#
+* finish documentation for transcode() options
+* implement copyright/author/etc setters to be used by transcode()
+* fix copyright/author/etc retrieval for the problematic .avi file in t/03.avi.t

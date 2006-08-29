@@ -250,6 +250,35 @@ sub mime_type {
   return $self->{'mime_type'};
 }
 
+=head2 extensions()
+
+=over
+
+=item Usage
+
+$obj->extensions(); #get existing value
+
+=item Function
+
+File extensions (following last '.') associated with format (eg mpg,mpeg)
+
+=item Returns
+
+value of extensions (a list)
+
+=item Arguments
+
+none, read-only
+
+=back
+
+=cut
+
+sub extensions {
+  my $self = shift;
+  return $self->{'extensions'} ? @{ $self->{'extensions'} } : ();
+}
+
 =head2 name()
 
 =over

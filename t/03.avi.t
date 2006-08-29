@@ -23,7 +23,7 @@ is($v0->width, 240,                           , 'stream 0 width ok');
 is($v0->height, 180,                          , 'stream 0 height ok');
 is($v0->quality, 0,                           , 'stream 0 quality is 0');
 like($v0->duration, qr/^0/,                   , 'stream 0 duration is 35usec');
-is(int($v0->frame_rate), 12                   , 'stream 0 frame rate ok');
+is(int($v0->video_rate), 12                   , 'stream 0 frame rate ok');
 
 ok(my $v1 = ($sg->streams)[1]                 , 'got stream 1');
 is($v1->isa('FFmpeg::Stream::Audio'), 1,                          , 'stream 1 is audio');

@@ -1,2 +1,2 @@
-#include "./config-5704.h"
-#include "./ffmpeg-5704.c"
+#include "./config-6036.h"
+#include "./ffmpeg-6036.c"

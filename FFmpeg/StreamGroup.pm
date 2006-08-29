@@ -47,7 +47,7 @@ Allen Day E<lt>allenday@ucla.eduE<gt>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (c) 2003-2004 Allen Day
+Copyright (c) 2003-2006 Allen Day
 
 This library is released under GPL, the Gnu Public License
 
@@ -810,16 +810,16 @@ sub _ffmpeg {
 
 C<
 $obj->capture_frame(
-                    image_format => $ffmpeg_format,
-                    offset       => $time_piece,
-                    frame_size   => "320x240",
-                    output_file  => "/path/to/file.ppm",
+                    image_format   => $ffmpeg_format,
+                    offset         => $time_piece,
+                    video_geometry => "320x240",
+                    output_file    => "/path/to/file.ppm",
 );
 >
 
 =item Function
 
-capture a frame from a streamgroup.  currently
+capture a frame from a streamgroup.  Currently
 implemented to capture only from first video
 stream, patches welcome.
 
@@ -832,19 +832,20 @@ the format requested
 
 =over
 
-=item frame_rate (optional)
+=item video_rate (optional)
 
-affect how many frames/second are captured.  for instance, a
-value of 0.016 will result in one roughly frame per minute.
+Affects how many frames/second are captured.  for instance, a
+value of 0.016 will result in one roughly frame per minute.  Default
+behavior is to capture every frame.
 
-=item frame_size (optional)
+=item video_geometry (optional)
 
-dimensions for image as a width x height string (eg "320x240").
-defaults to streamgroup's native frame size
+Dimensions for image as a width x height string (eg "320x240").
+Defaults to Streamgroup's native frame size
 
 =item output_file (optional)
 
-path to filename where captured frame willbe written.  defaults
+Path to filename where captured frame will be written.  defaults
 to an anonymous tempfile created using L<File::Temp|File::Temp> that is
 deleted upon program termination
 
@@ -878,58 +879,215 @@ sub capture_frame {
 sub capture_frames {
   my ($self,%arg) = @_;
 
-  #
-  #setup parameters for frame capture
-  #
-  $self->_ffmpeg->_set_input_file($self->url);
-
-  if($arg{frame_rate}){
-    $self->_ffmpeg->_set_frame_rate($arg{frame_rate});
-  }
-
-  $self->_ffmpeg->_set_format('image2pipe');
+  $arg{ 'file_format' } = $self->_ffmpeg->file_format( 'image2pipe' );
 
   my($fh, $fn);
-  if(!defined($arg{output_file})){
-    ($fh, $fn) = tempfile(UNLINK => 1, SUFFIX => '.ppm');
+  if ( ! defined( $arg{ 'output_file' } ) ) {
+    ($fh, $fn) = tempfile( UNLINK => 1, SUFFIX => '.ppm' );
+    $arg{ 'output_file' } = $fn;
   } else {
-    $fn = $arg{output_file};
+    $fn = $arg{ 'output_file' };
   }
 
-  if($arg{frame_size}){
-    $self->_ffmpeg->_set_frame_size($arg{frame_size});
-  }
-
-  if(defined($arg{offset})){
-    $self->_ffmpeg->_set_start_time($arg{offset});
-  } else {
-    $self->_ffmpeg->_set_start_time('00:00:00');
-  }
-
-  if(defined($arg{duration})){
-    my $t = $arg{duration};
-    $self->_ffmpeg->_set_recording_time($arg{duration});
-  } else {
-    #FIXME add warning, this is a full transcode
-  }
-
-  $self->_ffmpeg->_set_output_file($fn);
-
-  $self->_ffmpeg->toggle_stderr(1); #intercept STDERR writes from ffmpeg-c
-  $self->_ffmpeg->_run_ffmpeg();
-  $self->_ffmpeg->toggle_stderr(0); #reenable STDERR
+  $self->transcode( %arg );
 
   open($fh,$fn) or die "couldn't open '$fn': $!";
 
   my $iter = Image::Magick::Iterator->new();
-  $iter->format('PPM');
-  $iter->handle($fh);
-
-  $self->_ffmpeg->_cleanup();
+  $iter->format( 'PPM' );
+  $iter->handle($fh );
 
   return $iter;
+}
 
-  #return $fh; #FIXME, return an Image::Magick object
+=head2 transcode()
+
+=over
+
+=item Usage
+
+C<
+$sg->transcode(
+  file_format    => $format,        # (optional, required if 'output_file' argument is given) specifies written file format
+  output_file    => '/tmp/out.flv', # (optional) path to written file, named pipe, device, etc
+  offset         => '00:00:05',     # (optional) transcode from 5s into file
+  duration       => '00:00:30',     # (optional) transcode for 30s
+
+  video_rate     => 0.5,            # (optional) use every other frame
+  video_bitrate  => 8000,           # (optional) bitrate of video stream(s)
+  video_codec    => $vcodec,        # (optional) a FFmpeg::Codec object for which can_write() and is_video are both true
+  video_geometry => '320x240',      # (optional) use frame size of 320x240 (WxH)
+
+  audio_rate     => 44100,          # (optional) sample rate of audio stream(s)
+  audio_bitrate  => 8000,           # (optional) bitrate of audio stream(s)
+  audio_codec    => $acodec,        # (optional) a FFmpeg::Codec object for which can_write() and is_audio are both true
+
+);
+>
+
+=item Function
+
+Transcode (i.e. convert from one format/encoding to another)
+a StreamGroup.  Currently implemented to operate only on the first
+video and audio stream(s), patches welcome.
+
+=item Returns
+
+A new L<FFmpeg::StreamGroup> object.
+
+=item Arguments
+
+=over
+
+=item file_format (optional, required if 'output_file' argument is given)
+
+=item output_file (optional)
+
+Path to file where captured frame will be written.  Defaults
+to an anonymous tempfile created using L<File::Temp|File::Temp> that is
+deleted upon program termination.
+
+=item offset (optional)
+
+A string in HH:MM:SS.mmm format specifying offset at which to begin transcoding.
+Milliseconds optional.  Defaults to 00:00:00.
+
+=item duration (optional B<IMPORTANT>)
+
+A string in HH:MM:SS.mmm format specifying how many seconds will be transcoded.
+Milliseconds optional.  Defaults to the duration of the input StreamGroup.
+
+=item video_rate (optional)
+
+Affect how many frames/second are transcoded.  For instance, a
+value of 0.016 will result in one roughly frame per minute.  Defaults
+to the frame rate of the input StreamGroup.
+
+=item video_bitrate (optional)
+
+FIXME
+
+=item video_codec (optional)
+
+FIXME
+
+=item video_geometry (optional)
+
+Dimensions for image as a C<width x height> string (eg "C<320x240>").
+defaults to StreamGroup's native frame size.
+
+=item audio_rate (optional)
+
+FIXME
+
+=item audio_bitrate (optional)
+
+FIXME
+
+=item audio_codec (optional)
+
+FIXME
+
+=back
+
+=back
+
+=cut
+
+
+sub transcode {
+  my ( $self, %arg ) = @_;
+
+  $self->_ffmpeg->toggle_stderr(1) unless $self->_ffmpeg()->verbose() > 0; #intercept STDERR writes from ffmpeg-c
+  $self->_ffmpeg->toggle_stdout(1) unless $self->_ffmpeg()->verbose() > 0; #intercept STDERR writes from ffmpeg-c
+
+  $self->_ffmpeg()->_set_input_file( $self->url );
+
+  #### GENERAL ####
+  # set file format
+  my $format_ok = 0;
+  if ( $arg{ 'file_format' } ) {
+    if ( ref( $arg{ 'file_format' } ) && $arg{ 'file_format' }->isa( 'FFmpeg::FileFormat' ) ) {
+      if ( $arg{ 'file_format' }->can_write() ) {
+        $self->_ffmpeg()->_set_format( $arg{ 'file_format' }->name() );
+        $format_ok = 1;
+      }
+      else {
+        die "file_format is not writable";
+      }
+    }
+    else {
+      die "file_format myst be a FFmpeg::FileFormat object.";
+    }
+  }
+  # set output file
+  my ( $fh, $fn );
+  if( ! defined( $arg{ 'output_file' } ) ) {
+    ( $fh, $fn ) = tempfile( UNLINK => 1, SUFFIX => '.ff' );
+  }
+  else {
+    die "you must define file_format if output_file is defined" unless $format_ok;
+    $fn = $arg{ 'output_file' };
+  }
+  # set start time
+  if ( defined( $arg{ 'offset' } ) ) {
+    $self->_ffmpeg()->_set_start_time( $arg{ 'offset' } );
+  }
+  else {
+    $self->_ffmpeg()->_set_start_time( '00:00:00' );
+  }
+  # set duration
+  if ( defined( $arg{ 'duration' } ) ) {
+    $self->_ffmpeg()->_set_recording_time( $arg{'duration'} );
+  }
+
+  #### VIDEO ####
+  # set video rate
+  if( $arg{ 'video_rate' } ){
+    $self->_ffmpeg()->_set_video_rate( $arg{ 'video_rate' } );
+  }
+  # set video bitrate
+  if ( defined( $arg{ 'video_bitrate' } ) ) {
+    $self->_ffmpeg()->_set_video_bitrate( $arg{ 'video_bitrate' } );
+  }
+  # set video codec
+  if ( defined( $arg{ 'video_codec' } ) ) {
+    $self->_ffmpeg()->_set_video_codec( $arg{ 'video_codec' }->name() );
+  }
+  # set video geometry
+  if( $arg{ 'video_geometry' } ){
+    $self->_ffmpeg()->_set_video_geometry( $arg{ 'video_geometry' } );
+  }
+
+  #### AUDIO ####
+  # set audio sample rate
+  if ( defined( $arg{ 'audio_rate' } ) ) {
+    $self->_ffmpeg()->_set_audio_rate( $arg{ 'audio_rate' } );
+  }
+  # set audio bitrate
+  if ( defined( $arg{ 'audio_bitrate' } ) ) {
+    $self->_ffmpeg()->_set_audio_bitrate( $arg{ 'audio_bitrate' } );
+  }
+  # set audio codec
+  if ( defined( $arg{ 'audio_codec' } ) ) {
+    $self->_ffmpeg()->_set_audio_codec( $arg{ 'audio_codec' }->name() );
+  }
+
+  $self->_ffmpeg->_set_output_file($fn);
+
+warn "******".$self->_ffmpeg()->verbose();
+
+  $self->_ffmpeg->_run_ffmpeg();
+  $self->_ffmpeg->_cleanup();
+
+  my $ff = FFmpeg->new();
+  $ff->input_file( $fn );
+  my $sg = $self->_ffmpeg()->create_streamgroup();
+
+  $self->_ffmpeg->toggle_stderr(0) unless $self->_ffmpeg()->verbose() > 0; #reenable STDERR
+  $self->_ffmpeg->toggle_stdout(0) unless $self->_ffmpeg()->verbose() > 0; #reenable STDERR
+
+  return $sg;
 }
 
 1;

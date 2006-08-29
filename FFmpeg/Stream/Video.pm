@@ -67,21 +67,21 @@ L<FFmpeg::Stream/init()|FFmpeg::Stream::init()>
 
 =cut
 
-=head2 frame_rate()
+=head2 video_rate()
 
 =over
 
 =item Usage
 
- $obj->frame_rate();        #get existing value
+ $obj->video_rate();        #get existing value
 
 =item Function
 
-frame rate in frames/second.  this only applies to video streams
+video rate (frame rate) in frames/second.  this only applies to video streams
 
 =item Returns
 
-value of frame_rate (a scalar)
+value of video_rate (a scalar)
 
 =item Arguments
 
@@ -91,9 +91,9 @@ none, read-only
 
 =cut
 
-sub frame_rate {
+sub video_rate {
   my $self = shift;
-  return $self->{'frame_rate'};
+  return $self->{'video_rate'};
 }
 
 

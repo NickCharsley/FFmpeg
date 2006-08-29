@@ -1,14 +1,9 @@
 use ExtUtils::MakeMaker;
 use Config;
 
-$FFMPEG_ROOT = $ENV{FFMPEG_ROOT};
-#if(!defined($FFMPEG_ROOT)){
-#  die "you didn't define environmental variable \$FFMPEG_ROOT";
-#} elsif(opendir(ZZ,$FFMPEG_ROOT)){
-#  closedir(ZZ);
-#} else {
-#  die "couldn't opendir on \$FFMPEG_ROOT ('$FFMPEG_ROOT'): $!";
-#}
+$FFMPEG_ROOT = $ENV{FFMPEG_ROOT} || '/usr/include/ffmpeg';
+$FFMPEG_INC  = $ENV{FFMPEG_INC}  || $FFMPEG_ROOT || '/usr/include/ffmpeg';
+$FFMPEG_LIB  = $ENV{FFMPEG_LIB}  || $FFMPEG_ROOT || '/usr/lib';
 
 #
 # ... now we're ready to start the module build & install process
@@ -30,9 +25,6 @@ WriteMakefile(
       'LDDLFLAGS'     => "$Config{'lddlflags'} $LDDLFLAGS",
 
       'PREREQ_PM'     => {
-#no longer needed as of 0.04
-#              Time::Piece   => 1.08,
-#              Devel::Leak => 0,
               File::Temp => 0,
               HTTP::Request => 0,
               Image::Magick::Iterator   => 0.01,
@@ -45,6 +37,6 @@ WriteMakefile(
            AUTHOR         => 'Allen Day <allenday@ucla.edu>') : ()),
 
       'PERL_MALLOC_OK'  => 1,
-      'LIBS'            => ["-lavcodec -lavformat -lm -lz -ldl -lmp3lame -logg -lvorbis -lvorbisenc"],
-      'INC'             => "-I. -I$FFMPEG_ROOT/libavutil -I$FFMPEG_ROOT/libavcodec -I$FFMPEG_ROOT/libavformat -I/usr/include/ffmpeg -I/usr/include/ffmpeg/libavcodec -I/usr/include/ffmpeg/libavformat -I/usr/include/ffmpeg/libavutil",
+      'LIBS'            => ["-L$FFMPEG_LIB -lavcodec -lavformat -lm -lz -ldl -lmp3lame -logg -lvorbis -lvorbisenc"],
+      'INC'             => "-I. -I$FFMPEG_INC -I$FFMPEG_INC/libavutil -I$FFMPEG_INC/libavcodec -I$FFMPEG_INC/libavformat",
 );

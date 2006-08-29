@@ -1,3 +1,6 @@
+config-6036.h
+ffmpeg-6036.c
+ffmpeg-6036.c.orig
 Changes
 eg/t1.asf
 eg/t1.avi
@@ -9,6 +12,7 @@ eg/t1.mpg
 eg/t2.asf
 eg/t2.avi
 eg/t2.mov
+eg/t2.mpg
 eg/t3.asf
 FFmpeg.pm
 FFmpeg.xs
@@ -25,9 +29,7 @@ Makefile.PL
 MANIFEST
 META.yml			Module meta-data (added by MakeMaker)
 README
-config-5704.h
 ffmpeg.h
-ffmpeg-5704.c
 t/01.FFmpeg.t
 t/02.asf.t
 t/03.avi.t
@@ -38,3 +40,4 @@ t/07.m2v.t
 t/08.capture.t
 t/09.http.t
 t/10.perf.t
+t/11.transcode.t

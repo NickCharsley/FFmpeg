@@ -15,7 +15,7 @@ ok($ff->isa('FFmpeg')                              , 'object correct type A');
 ok(my $sg = $ff->create_streamgroup                , 'streamgroup created successfully');
 ok($sg->isa('FFmpeg::StreamGroup')                 , 'object correct type B');
 
-ok($frame = $sg->capture_frame(offset => '00:00:00'), 'captured frame');
+ok(my $frame = $sg->capture_frame(offset => '00:00:00'), 'captured frame');
 
 ok(!$frame->Write(filename=>catfile('eg','test','t0.ppm')), 'wrote frame 0 to file');
 ok(-f catfile('eg','test','t0.ppm')                , 'frame file exists');
@@ -32,7 +32,7 @@ while(my $frame = $iterator->next){
 }
 
 #CAPTURE ALL 30 frames at 1s offset, one frame every 0.5s
-ok($iterator = $sg->capture_frames(duration => '00:00:01', frame_rate => 0.5)  , 'frame iterator');
+ok($iterator = $sg->capture_frames(duration => '00:00:01', video_rate => 0.5)  , 'frame iterator');
 isa_ok($iterator,'Image::Magick::Iterator'         , 'frame iterator okay');
 $i = 0;
 while(my $frame = $iterator->next){
@@ -45,8 +45,8 @@ while(my $frame = $iterator->next){
 
 #CAPTURE ALL 30 frames at 1s offset, one frame every 0.5s, resized to 160x120
 ok($iterator = $sg->capture_frames(duration => '00:00:01',
-                                   frame_rate => 0.5,
-                                   frame_size => '160x120'),
+                                   video_rate => 0.5,
+                                   video_geometry => '160x120'),
    'frame iterator');
 isa_ok($iterator,'Image::Magick::Iterator'         , 'frame iterator okay');
 $i = 0;
